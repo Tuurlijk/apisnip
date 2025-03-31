@@ -1,19 +1,11 @@
 use std::fs;
 use std::io::stdout;
-/// A Ratatui example that demonstrates the Elm architecture with a basic list - detail
-/// application.
-///
-/// This example runs with the Ratatui library code in the branch that you are currently
-/// reading. See the [`latest`] branch for the code which works with the most recent Ratatui
-/// release.
-///
-/// [`latest`]: https://github.com/ratatui/ratatui/tree/latest
 use std::time::Duration;
 
 mod config;
 
 use clap::Parser;
-use color_eyre::eyre::OptionExt;
+use color_eyre::eyre::{self, OptionExt};
 use crossterm::ExecutableCommand;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind,
@@ -21,19 +13,22 @@ use crossterm::event::{
 use itertools::Itertools;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState};
 use serde_yaml::{self, Mapping, Value};
 
-static INFO_TEXT: &str = " (Esc/q) quit | (↑) move up | (↓) move down ";
+static INFO_TEXT: &str = " (Esc/q) quit | (space/Enter) toggle select and move to next | (w) write and quit | (↑) move up | (↓) move down | (PageUp/PageDown) move page up/down ";
 
 /// Application data model and state
 #[derive(Debug, Default)]
 struct Model {
-    table_items: Vec<Data>,
+    table_items: Vec<Endpoint>,
     table_state: TableState,
     running_state: RunningState,
+    table_area: Option<ratatui::layout::Rect>,
+    infile: String,
+    outfile: String,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -45,18 +40,25 @@ enum RunningState {
 
 /// Data model
 #[derive(Debug, Default)]
-struct Data {
+struct Endpoint {
     methods: Vec<Method>,
     path: String,
     description: String,
     refs: Vec<String>,
+    status: Status,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+enum Status {
+    #[default]
+    Unselected,
+    Selected,
 }
 
 #[derive(Debug, Default)]
 struct Method {
     method: String,
     description: String,
-    refs: Vec<String>,
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -64,6 +66,11 @@ enum Message {
     SelectNext,
     SelectPrevious,
     SelectRow(u16),
+    ToggleSelectItem,
+    ToggleSelectItemAndSelectNext,
+    SelectNextPage,
+    SelectPreviousPage,
+    WriteAndQuit,
     Quit,
 }
 
@@ -90,16 +97,15 @@ fn about_str() -> &'static str {
 
     // Build the about string with the dynamic value
     let about_str = format!(
-        r"              
-                     _____     _ _____     _     
+        r"                     _____     _ _____     _     
                     |  _  |___|_|   __|___|_|___ 
                     |     | . | |__   |   | | . |
                     |__|__|  _|_|_____|_|_|_|  _|
                           |_|               |_|  
 
-                Trim an API surface down to size
-                  Coded with ♥️ by Michiel Roos
-                           {}
+                   Trim an API surface down to size
+                    Coded with ♥️ by Michiel Roos
+                        {}
 ",
         dynamic_value
     );
@@ -115,7 +121,7 @@ fn main() -> color_eyre::Result<()> {
     let input_yaml = fs::read_to_string(&args.infile)?;
     let spec: Mapping = serde_yaml::from_str(&input_yaml)?;
 
-    let mut table_items: Vec<Data> = Vec::new();
+    let mut table_items: Vec<Endpoint> = Vec::new();
     let paths = spec
         .get(&Value::String("paths".to_string()))
         .and_then(|v| v.as_mapping())
@@ -123,7 +129,7 @@ fn main() -> color_eyre::Result<()> {
 
     for (path, ops) in paths {
         let path_str = path.as_str().ok_or_eyre("Path key is not a string")?;
-        let mut table_item = Data::default();
+        let mut table_item = Endpoint::default();
         let ops_map = ops
             .as_mapping()
             .ok_or_eyre(format!("Operations for '{}' not a mapping", path_str))?;
@@ -170,9 +176,14 @@ fn main() -> color_eyre::Result<()> {
         table_items.push(table_item);
     }
 
+    // Order table items by path
+    table_items.sort_by_key(|item| item.path.clone());
+
     let mut terminal = tui::init_terminal()?;
     let mut model = Model {
         table_items: table_items,
+        infile: args.infile,
+        outfile: args.outfile,
         ..Default::default()
     };
     stdout().execute(EnableMouseCapture)?;
@@ -193,9 +204,8 @@ fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
-// Fetch the $ref: values from the operation
-
-// Recursively fetch all $ref values from a Value tree
+/// Fetch the $ref: values from the operation
+/// Recursively fetch all $ref values from a Value tree
 fn fetch_refs(value: &Value) -> Vec<String> {
     let mut refs = Vec::new();
     match value {
@@ -225,7 +235,7 @@ fn view(model: &mut Model, frame: &mut Frame) {
         .areas(frame.area());
 
     // Table setup
-    let header = Row::new(vec!["Summary", "Path", "Summary"])
+    let header = Row::new(vec!["Summary", "Path", "Methods"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .height(1);
 
@@ -239,8 +249,20 @@ fn view(model: &mut Model, frame: &mut Frame) {
                 .collect::<Vec<&str>>()
                 .join("/");
         }
+
+        let description_selection = match data.status {
+            Status::Unselected => format!(" ☐ {}", description),
+            Status::Selected => format!(" ✓ {}", description),
+        };
+
+        let row_style = if data.status == Status::Selected {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default()
+        };
+
         Row::new(vec![
-            description,
+            description_selection,
             data.path.clone(),
             data.methods
                 .iter()
@@ -249,6 +271,7 @@ fn view(model: &mut Model, frame: &mut Frame) {
                 .join(" "),
         ])
         .height(1)
+        .style(row_style)
     });
 
     let table = Table::new(
@@ -260,8 +283,11 @@ fn view(model: &mut Model, frame: &mut Frame) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Terminal fans "),
+            .title(format!(" Endpoints for {}", model.infile)),
     );
+
+    // Store the table area for pagination
+    model.table_area = Some(top);
 
     frame.render_stateful_widget(table, top, &mut model.table_state);
 
@@ -283,7 +309,7 @@ fn view(model: &mut Model, frame: &mut Frame) {
     }
 
     let detail = Paragraph::new(format!(
-        "Method: {}\n\nPath: {}\n\nRefs:\n- {}",
+        "Methods: {}\n\nPath: {}\n\nRefs:\n- {}",
         selected_item
             .methods
             .iter()
@@ -320,6 +346,12 @@ const fn handle_key(key: event::KeyEvent) -> Option<Message> {
         KeyCode::Char('j') | KeyCode::Down => Some(Message::SelectNext),
         KeyCode::Char('k') | KeyCode::Up => Some(Message::SelectPrevious),
         KeyCode::Char('q') | KeyCode::Esc => Some(Message::Quit),
+        KeyCode::Char('w') => Some(Message::WriteAndQuit),
+        KeyCode::Char(' ') | KeyCode::Right | KeyCode::Enter => {
+            Some(Message::ToggleSelectItemAndSelectNext)
+        }
+        KeyCode::PageDown => Some(Message::SelectNextPage),
+        KeyCode::PageUp => Some(Message::SelectPreviousPage),
         _ => None,
     }
 }
@@ -335,7 +367,66 @@ const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
 
 fn update(model: &mut Model, msg: Message) -> Option<Message> {
     match msg {
-        Message::Quit => model.running_state = RunningState::Done,
+        Message::WriteAndQuit => {
+            // Get selected items
+            let selected_items: Vec<&Endpoint> = model
+                .table_items
+                .iter()
+                .filter(|item| item.status == Status::Selected)
+                .collect();
+
+            // Convert selected items to YAML
+            let mut output = Mapping::new();
+            for item in selected_items {
+                let mut endpoint = Mapping::new();
+
+                // Add methods
+                let mut methods = Mapping::new();
+                for method in &item.methods {
+                    let mut method_data = Mapping::new();
+                    method_data.insert(
+                        Value::String("summary".to_string()),
+                        Value::String(method.description.clone()),
+                    );
+                    methods.insert(
+                        Value::String(method.method.clone()),
+                        Value::Mapping(method_data),
+                    );
+                }
+                endpoint.insert(
+                    Value::String("methods".to_string()),
+                    Value::Mapping(methods),
+                );
+
+                // Add path
+                endpoint.insert(
+                    Value::String("path".to_string()),
+                    Value::String(item.path.clone()),
+                );
+
+                // Add description if available
+                if !item.description.is_empty() {
+                    endpoint.insert(
+                        Value::String("description".to_string()),
+                        Value::String(item.description.clone()),
+                    );
+                }
+
+                output.insert(Value::String(item.path.clone()), Value::Mapping(endpoint));
+            }
+            use eyre::WrapErr;
+
+            // Write to file
+            let output_yaml = serde_yaml::to_string(&output).wrap_err("Failed to serialize output");
+            fs::write(&model.outfile, output_yaml.unwrap())
+                .wrap_err("Failed to write output to file")
+                .unwrap();
+
+            model.running_state = RunningState::Done;
+        }
+        Message::Quit => {
+            model.running_state = RunningState::Done;
+        }
         Message::SelectNext => {
             let current_index = model.table_state.selected().unwrap_or(0);
             if current_index < model.table_items.len() - 1 {
@@ -357,8 +448,47 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
                 model.table_state.select(Some(actual_index));
             }
         }
+        Message::ToggleSelectItem => {
+            let current_index = model.table_state.selected().unwrap_or(0);
+            model.table_items[current_index].status =
+                if model.table_items[current_index].status == Status::Selected {
+                    Status::Unselected
+                } else {
+                    Status::Selected
+                };
+        }
+        Message::ToggleSelectItemAndSelectNext => {
+            let current_index = model.table_state.selected().unwrap_or(0);
+            model.table_items[current_index].status =
+                if model.table_items[current_index].status == Status::Selected {
+                    Status::Unselected
+                } else {
+                    Status::Selected
+                };
+            if current_index < model.table_items.len() - 1 {
+                model.table_state.select(Some(current_index + 1));
+            }
+        }
+        Message::SelectNextPage => {
+            let visible_rows = calculate_visible_table_rows(model);
+            model.table_state.scroll_down_by(visible_rows);
+        }
+        Message::SelectPreviousPage => {
+            let visible_rows = calculate_visible_table_rows(model);
+            model.table_state.scroll_up_by(visible_rows);
+        }
     };
     None
+}
+
+fn calculate_visible_table_rows(model: &Model) -> u16 {
+    // Each row is 1 line high, header is 1 line, borders are 2 lines
+    let total_rows = model.table_items.len() as u16;
+    let visible_rows = model
+        .table_area
+        .map(|area| area.height.saturating_sub(3))
+        .unwrap_or(1);
+    visible_rows.min(total_rows)
 }
 
 mod tui {
