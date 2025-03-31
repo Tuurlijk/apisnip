@@ -12,13 +12,13 @@ use crossterm::event::{
 };
 use itertools::Itertools;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState};
 use serde_yaml::{self, Mapping, Value};
 
-static INFO_TEXT: &str = " (Esc/q) quit | (space/Enter) toggle select and move to next | (w) write and quit | (↑) move up | (↓) move down | (PageUp/PageDown) move page up/down ";
+static INFO_TEXT: &str = " (q) quit | (space/Enter) toggle select and move to next | (w) write and quit | (↑) move up | (↓) move down | (PageUp/PageDown) move page up/down ";
 
 /// Application data model and state
 #[derive(Debug, Default)]
@@ -29,6 +29,7 @@ struct Model {
     table_area: Option<ratatui::layout::Rect>,
     infile: String,
     outfile: String,
+    spec: Mapping,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -79,11 +80,11 @@ enum Message {
 #[clap(version, about = about_str())]
 pub struct Args {
     /// The name of the input file
-    #[clap(short, long)]
+    #[clap()]
     infile: String,
 
     /// The name of the output file
-    #[clap(short, long)]
+    #[clap(default_value = "apisnip.out.yaml")]
     outfile: String,
 
     /// Enable verbose output
@@ -120,25 +121,58 @@ fn main() -> color_eyre::Result<()> {
     let args = Args::parse();
     let input_yaml = fs::read_to_string(&args.infile)?;
     let spec: Mapping = serde_yaml::from_str(&input_yaml)?;
+    let mut model = Model {
+        infile: args.infile,
+        outfile: args.outfile,
+        spec: spec,
+        ..Default::default()
+    };
+    model.table_items = fetch_endpoints_from_spec(&model.spec);
 
+    let mut terminal = tui::init_terminal()?;
+    stdout().execute(EnableMouseCapture)?;
+    while model.running_state != RunningState::Done {
+        // Render the current view
+        terminal.draw(|f| view(&mut model, f))?;
+
+        // Handle events and map to a Message
+        let mut current_msg = handle_event(&model)?;
+
+        // Process updates as long as they return a non-None message
+        while current_msg.is_some() {
+            current_msg = update(&mut model, current_msg.unwrap());
+        }
+    }
+    stdout().execute(DisableMouseCapture)?;
+    tui::restore_terminal()?;
+    Ok(())
+}
+
+fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
     let mut table_items: Vec<Endpoint> = Vec::new();
     let paths = spec
         .get(&Value::String("paths".to_string()))
         .and_then(|v| v.as_mapping())
-        .ok_or_eyre("No 'paths' field found or it's not a mapping")?;
+        .ok_or_eyre("No 'paths' field found or it's not a mapping")
+        .unwrap();
 
     for (path, ops) in paths {
-        let path_str = path.as_str().ok_or_eyre("Path key is not a string")?;
+        let path_str = path
+            .as_str()
+            .ok_or_eyre("Path key is not a string")
+            .unwrap();
         let mut table_item = Endpoint::default();
         let ops_map = ops
             .as_mapping()
-            .ok_or_eyre(format!("Operations for '{}' not a mapping", path_str))?;
+            .ok_or_eyre(format!("Operations for '{}' not a mapping", path_str))
+            .unwrap();
         let mut refs: Vec<String> = Vec::new();
         for (ops_method, op) in ops_map {
             let mut method = Method::default();
             let method_str = ops_method
                 .as_str()
-                .ok_or_eyre("Method key is not a string")?;
+                .ok_or_eyre("Method key is not a string")
+                .unwrap();
             if method_str == "parameters" {
                 continue;
             }
@@ -178,30 +212,7 @@ fn main() -> color_eyre::Result<()> {
 
     // Order table items by path
     table_items.sort_by_key(|item| item.path.clone());
-
-    let mut terminal = tui::init_terminal()?;
-    let mut model = Model {
-        table_items: table_items,
-        infile: args.infile,
-        outfile: args.outfile,
-        ..Default::default()
-    };
-    stdout().execute(EnableMouseCapture)?;
-    while model.running_state != RunningState::Done {
-        // Render the current view
-        terminal.draw(|f| view(&mut model, f))?;
-
-        // Handle events and map to a Message
-        let mut current_msg = handle_event(&model)?;
-
-        // Process updates as long as they return a non-None message
-        while current_msg.is_some() {
-            current_msg = update(&mut model, current_msg.unwrap());
-        }
-    }
-    stdout().execute(DisableMouseCapture)?;
-    tui::restore_terminal()?;
-    Ok(())
+    table_items
 }
 
 /// Fetch the $ref: values from the operation
@@ -283,7 +294,8 @@ fn view(model: &mut Model, frame: &mut Frame) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Endpoints for {}", model.infile)),
+            .title(format!(" Endpoints for {}", model.infile))
+            .title_alignment(Alignment::Center),
     );
 
     // Store the table area for pagination
@@ -345,7 +357,7 @@ const fn handle_key(key: event::KeyEvent) -> Option<Message> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => Some(Message::SelectNext),
         KeyCode::Char('k') | KeyCode::Up => Some(Message::SelectPrevious),
-        KeyCode::Char('q') | KeyCode::Esc => Some(Message::Quit),
+        KeyCode::Char('q') => Some(Message::Quit),
         KeyCode::Char('w') => Some(Message::WriteAndQuit),
         KeyCode::Char(' ') | KeyCode::Right | KeyCode::Enter => {
             Some(Message::ToggleSelectItemAndSelectNext)
@@ -368,60 +380,10 @@ const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
 fn update(model: &mut Model, msg: Message) -> Option<Message> {
     match msg {
         Message::WriteAndQuit => {
-            // Get selected items
-            let selected_items: Vec<&Endpoint> = model
-                .table_items
-                .iter()
-                .filter(|item| item.status == Status::Selected)
-                .collect();
-
-            // Convert selected items to YAML
-            let mut output = Mapping::new();
-            for item in selected_items {
-                let mut endpoint = Mapping::new();
-
-                // Add methods
-                let mut methods = Mapping::new();
-                for method in &item.methods {
-                    let mut method_data = Mapping::new();
-                    method_data.insert(
-                        Value::String("summary".to_string()),
-                        Value::String(method.description.clone()),
-                    );
-                    methods.insert(
-                        Value::String(method.method.clone()),
-                        Value::Mapping(method_data),
-                    );
-                }
-                endpoint.insert(
-                    Value::String("methods".to_string()),
-                    Value::Mapping(methods),
-                );
-
-                // Add path
-                endpoint.insert(
-                    Value::String("path".to_string()),
-                    Value::String(item.path.clone()),
-                );
-
-                // Add description if available
-                if !item.description.is_empty() {
-                    endpoint.insert(
-                        Value::String("description".to_string()),
-                        Value::String(item.description.clone()),
-                    );
-                }
-
-                output.insert(Value::String(item.path.clone()), Value::Mapping(endpoint));
-            }
-            use eyre::WrapErr;
-
-            // Write to file
-            let output_yaml = serde_yaml::to_string(&output).wrap_err("Failed to serialize output");
-            fs::write(&model.outfile, output_yaml.unwrap())
-                .wrap_err("Failed to write output to file")
-                .unwrap();
-
+            write_spec_to_file(&model).unwrap_or_else(|e| {
+                eprintln!("Failed to write spec to file: {}", e);
+                model.running_state = RunningState::Done;
+            });
             model.running_state = RunningState::Done;
         }
         Message::Quit => {
@@ -479,6 +441,51 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
         }
     };
     None
+}
+
+fn write_spec_to_file(model: &Model) -> color_eyre::Result<()> {
+    // Get selected items
+    let selected_items: Vec<&Endpoint> = model
+        .table_items
+        .iter()
+        .filter(|item| item.status == Status::Selected)
+        .collect();
+
+    // Get the original paths from spec
+    let original_paths = model
+        .spec
+        .get(&Value::String("paths".to_string()))
+        .and_then(|v| v.as_mapping())
+        .unwrap();
+
+    // Create paths mapping with only selected paths, keeping their original data
+    let mut paths = Mapping::new();
+    for item in selected_items {
+        if let Some(path_data) = original_paths.get(&Value::String(item.path.clone())) {
+            paths.insert(Value::String(item.path.clone()), path_data.clone());
+        }
+    }
+
+    let mut output = Mapping::new();
+    // Copy all elements from the spec except paths
+    for (key, value) in &model.spec {
+        if key.as_str() != Some("paths") {
+            output.insert(key.clone(), value.clone());
+        } else {
+            output.insert(
+                Value::String("paths".to_string()),
+                Value::Mapping(paths.clone()),
+            );
+        }
+    }
+
+    // Write to file
+    use eyre::WrapErr;
+    let output_yaml = serde_yaml::to_string(&output).wrap_err("Failed to serialize output");
+    fs::write(&model.outfile, output_yaml.unwrap())
+        .wrap_err("Failed to write output to file")
+        .unwrap();
+    Ok(())
 }
 
 fn calculate_visible_table_rows(model: &Model) -> u16 {
