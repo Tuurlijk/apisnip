@@ -1,16 +1,14 @@
 use std::io::stdout;
-use std::time::Duration;
 
 mod file;
 mod shortcuts;
 mod spec_processor;
 mod ui;
+mod event;
 
 use clap::Parser;
 use crossterm::ExecutableCommand;
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind,
-};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::TableState;
@@ -18,6 +16,7 @@ use serde_yaml::Mapping;
 
 use spec_processor::{Endpoint, Status};
 use ui::{render_detail, render_table};
+use event::{handle_event, Message};
 
 #[derive(Debug, Default)]
 struct AppModel {
@@ -35,18 +34,6 @@ enum RunningState {
     #[default]
     Running,
     Done,
-}
-
-#[derive(PartialEq, Copy, Clone)]
-enum Message {
-    SelectNext,
-    SelectPrevious,
-    SelectRow(u16),
-    ToggleSelectItemAndSelectNext,
-    SelectNextPage,
-    SelectPreviousPage,
-    WriteAndQuit,
-    Quit,
 }
 
 /// Trim an API surface down to size
@@ -115,7 +102,7 @@ fn main() -> color_eyre::Result<()> {
         terminal.draw(|f| view(&mut model, f))?;
 
         // Handle events and map to a Message
-        let mut current_msg = handle_event(&model)?;
+        let mut current_msg = handle_event()?;
 
         // Process updates as long as they return a non-None message
         while current_msg.is_some() {
@@ -134,47 +121,14 @@ fn view(model: &mut AppModel, frame: &mut Frame) {
     render_detail(model, bottom, frame);
 }
 
-fn handle_event(_: &AppModel) -> color_eyre::Result<Option<Message>> {
-    if event::poll(Duration::from_millis(250))? {
-        match event::read()? {
-            Event::Key(key) if key.kind == event::KeyEventKind::Press => Ok(handle_key(key)),
-            Event::Mouse(mouse) => Ok(handle_mouse(mouse)),
-            _ => Ok(None),
-        }
-    } else {
-        Ok(None)
-    }
-}
-
-const fn handle_key(key: event::KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::SelectNext),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::SelectPrevious),
-        KeyCode::Char('q') => Some(Message::Quit),
-        KeyCode::Char('w') => Some(Message::WriteAndQuit),
-        KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
-        KeyCode::PageDown => Some(Message::SelectNextPage),
-        KeyCode::PageUp => Some(Message::SelectPreviousPage),
-        _ => None,
-    }
-}
-
-const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
-    match mouse.kind {
-        MouseEventKind::ScrollDown => Some(Message::SelectPrevious),
-        MouseEventKind::ScrollUp => Some(Message::SelectNext),
-        MouseEventKind::Down(_) => Some(Message::SelectRow(mouse.row)),
-        _ => None,
-    }
-}
-
 fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
     match msg {
         Message::WriteAndQuit => {
-            write_spec_to_file(model).unwrap_or_else(|e| {
-                eprintln!("Failed to write spec to file: {}", e);
-                model.running_state = RunningState::Done;
-            });
+            file::write_spec_to_file(&model.outfile, &model.spec, &model.table_items)
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to write spec to file: {}", e);
+                    model.running_state = RunningState::Done;
+                });
             model.running_state = RunningState::Done;
         }
         Message::Quit => {
@@ -223,17 +177,6 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
         }
     };
     None
-}
-
-fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
-    let selected_items: Vec<&Endpoint> = model
-        .table_items
-        .iter()
-        .filter(|item| item.status == Status::Selected)
-        .collect();
-
-    let output = spec_processor::process_spec_for_output(&model.spec, &selected_items)?;
-    file::write_spec(&model.outfile, &output)
 }
 
 fn calculate_visible_table_rows(model: &AppModel) -> u16 {
