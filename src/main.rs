@@ -2,7 +2,7 @@ use std::fs;
 use std::io::stdout;
 use std::time::Duration;
 
-mod config;
+mod shortcuts;
 
 use clap::Parser;
 use color_eyre::eyre::{self, OptionExt};
@@ -11,11 +11,11 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind,
 };
 use itertools::Itertools;
-use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState};
+use ratatui::{Frame, symbols};
 use serde_yaml::{self, Mapping, Value};
 
 #[derive(Debug, Default)]
@@ -63,7 +63,6 @@ enum Message {
     SelectNext,
     SelectPrevious,
     SelectRow(u16),
-    ToggleSelectItem,
     ToggleSelectItemAndSelectNext,
     SelectNextPage,
     SelectPreviousPage,
@@ -113,7 +112,6 @@ fn about_str() -> &'static str {
 
 fn main() -> color_eyre::Result<()> {
     tui::install_panic_hook();
-    let config = config::get_config();
     let args = Args::parse();
     stdout().execute(EnableMouseCapture)?;
     let input_yaml = fs::read_to_string(&args.infile)?;
@@ -203,11 +201,14 @@ fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
             } else {
                 description
             };
-            refs.extend(fetch_refs(op));
+            refs.extend(fetch_all_references(op));
             table_item.methods.push(method);
         }
         table_item.path = path_str.to_string();
-        table_item.refs = refs.into_iter().unique().collect();
+        table_item.refs = strip_path_from_references(&refs)
+            .into_iter()
+            .unique()
+            .collect();
         table_items.push(table_item);
     }
 
@@ -216,9 +217,8 @@ fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
     table_items
 }
 
-/// Fetch the $ref: values from the operation
 /// Recursively fetch all $ref values from a Value tree
-fn fetch_refs(value: &Value) -> Vec<String> {
+fn fetch_all_references(value: &Value) -> Vec<String> {
     let mut refs = Vec::new();
     match value {
         Value::Mapping(map) => {
@@ -228,13 +228,13 @@ fn fetch_refs(value: &Value) -> Vec<String> {
             }
             // Recurse into all values in the mapping
             for (_, v) in map {
-                refs.extend(fetch_refs(v));
+                refs.extend(fetch_all_references(v));
             }
         }
         Value::Sequence(seq) => {
             // Recurse into sequence items
             for item in seq {
-                refs.extend(fetch_refs(item));
+                refs.extend(fetch_all_references(item));
             }
         }
         _ => {} // Scalars (String, Number, Bool, Null) have no refs
@@ -250,7 +250,7 @@ fn view(model: &mut AppModel, frame: &mut Frame) {
 }
 
 fn render_table(model: &mut AppModel, area: Rect, frame: &mut Frame) {
-    let header = Row::new(vec!["Summary", "Path", "Methods"])
+    let header = Row::new(vec!["    Summary", "Path", "Methods"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .height(1);
 
@@ -297,7 +297,7 @@ fn render_table(model: &mut AppModel, area: Rect, frame: &mut Frame) {
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::ITALIC))
     .block(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .title(format!(" Endpoints for {}", model.infile))
             .title_alignment(Alignment::Center),
     );
@@ -321,12 +321,15 @@ fn render_detail(model: &AppModel, area: Rect, frame: &mut Frame) {
     }
 
     let mut detail_lines: Vec<Line> = Vec::new();
+    detail_lines.push(Line::from(description));
+    detail_lines.push(Line::from("".to_string()));
     detail_lines.push(
         Line::from(selected_item.path.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
     );
     for method in selected_item.methods.iter() {
         detail_lines.push(styled_method(method));
     }
+    detail_lines.push(Line::from("".to_string()));
 
     let mut refs_lines: Vec<Line> = Vec::new();
     for reference in selected_item.refs.iter() {
@@ -334,17 +337,30 @@ fn render_detail(model: &AppModel, area: Rect, frame: &mut Frame) {
     }
     if refs_lines.len() > 0 {
         detail_lines.push(Line::from("".to_string()));
-        detail_lines.push(Line::from("Refs:".to_string()));
+        detail_lines.push(Line::from("Component schemas:".to_string()));
         detail_lines.extend(refs_lines);
     }
 
+    let collapsed_top_border_set = symbols::border::Set {
+        top_left: symbols::line::NORMAL.vertical_right,
+        top_right: symbols::line::NORMAL.vertical_left,
+        ..symbols::border::PLAIN
+    };
+
+    let shortcuts = shortcuts::Shortcuts::from(vec![
+        ("q", "quit"),
+        ("space", "✂️ snip"),
+        ("w", "write and quit"),
+        ("↑", "move up"),
+        ("↓", "move down"),
+    ]);
+
     let detail = Paragraph::new(Text::from(detail_lines)).block(
         Block::default()
+            .border_set(collapsed_top_border_set)
             .borders(Borders::ALL)
-            .title(format!(" {} ", description))
-            .title_bottom(
-                " (q) quit | (space) select | (w) write and quit | (↑) move up | (↓) move down ",
-            )
+            .title_bottom(shortcuts.as_line())
+            .title_alignment(Alignment::Right)
             .padding(Padding::new(1, 1, 0, 0)),
     );
     frame.render_widget(detail, area);
@@ -417,15 +433,6 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
                 model.table_state.select(Some(actual_index));
             }
         }
-        Message::ToggleSelectItem => {
-            let current_index = model.table_state.selected().unwrap_or(0);
-            model.table_items[current_index].status =
-                if model.table_items[current_index].status == Status::Selected {
-                    Status::Unselected
-                } else {
-                    Status::Selected
-                };
-        }
         Message::ToggleSelectItemAndSelectNext => {
             let current_index = model.table_state.selected().unwrap_or(0);
             model.table_items[current_index].status =
@@ -450,6 +457,13 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
     None
 }
 
+fn strip_path_from_references(references: &[String]) -> Vec<String> {
+    references
+        .iter()
+        .map(|ref_str| ref_str.split('/').last().unwrap().to_string())
+        .collect::<Vec<String>>()
+}
+
 fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
     // Get selected items
     let selected_items: Vec<&Endpoint> = model
@@ -458,8 +472,8 @@ fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
         .filter(|item| item.status == Status::Selected)
         .collect();
 
-    // Get the original paths from spec
-    let original_paths = model
+    // Get the original paths and operations from spec
+    let original_path_specifications = model
         .spec
         .get(&Value::String("paths".to_string()))
         .and_then(|v| v.as_mapping())
@@ -468,16 +482,82 @@ fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
     // Create paths mapping with only selected paths, keeping their original data
     let mut paths = Mapping::new();
     for item in selected_items {
-        if let Some(path_data) = original_paths.get(&Value::String(item.path.clone())) {
+        if let Some(path_data) = original_path_specifications.get(&Value::String(item.path.clone()))
+        {
             paths.insert(Value::String(item.path.clone()), path_data.clone());
         }
     }
+
+    // Collect all references from the selected items
+    let collected_references_as_schema_index = model
+        .table_items
+        .iter()
+        .filter(|item| item.status == Status::Selected)
+        .map(|item| item.refs.clone())
+        .flatten()
+        .unique()
+        .collect::<Vec<String>>();
+
+    // Under components/schemas, there are definitions for all the references
+    // But these definitions can also contain references, so we need to collect all of them
+    let mut all_references_to_preserve = Vec::new();
+    let components = model
+        .spec
+        .get(&Value::String("components".to_string()))
+        .and_then(|v| v.as_mapping())
+        .unwrap();
+    for (key, value) in components {
+        if key.as_str() == Some("schemas") {
+            if let Some(schema) = value.as_mapping() {
+                for (schema_key, schema_value) in schema {
+                    if collected_references_as_schema_index
+                        .contains(&schema_key.as_str().unwrap().to_string())
+                    {
+                        all_references_to_preserve.extend(fetch_all_references(schema_value));
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract schema names from all references
+    let mut all_references_as_schema_index =
+        strip_path_from_references(&all_references_to_preserve);
+    all_references_as_schema_index.extend(collected_references_as_schema_index);
+
+    // Remove duplicates
+    all_references_as_schema_index.sort();
+    all_references_as_schema_index.dedup();
 
     let mut output = Mapping::new();
     // Copy all elements from the spec except paths
     for (key, value) in &model.spec {
         if key.as_str() != Some("paths") {
-            output.insert(key.clone(), value.clone());
+            if key.as_str() == Some("components") {
+                let mut components_output = Mapping::new();
+                // Iterate over all children of components and insert them into the output
+                for (child_key, child_value) in value.as_mapping().unwrap() {
+                    // Unless the child key is schemas
+                    if child_key.as_str() != Some("schemas") {
+                        components_output.insert(child_key.clone(), child_value.clone());
+                    } else {
+                        // Iterate over all children of schemas and insert them into the output
+                        // But only if the schema key is in all_references_as_schema_index
+                        let mut schema_output = Mapping::new();
+                        for (schema_key, schema_value) in child_value.as_mapping().unwrap() {
+                            if all_references_as_schema_index
+                                .contains(&schema_key.as_str().unwrap().to_string())
+                            {
+                                schema_output.insert(schema_key.clone(), schema_value.clone());
+                            }
+                        }
+                        components_output.insert(child_key.clone(), Value::Mapping(schema_output));
+                    }
+                }
+                output.insert(key.clone(), Value::Mapping(components_output));
+            } else {
+                output.insert(key.clone(), value.clone());
+            }
         } else {
             output.insert(
                 Value::String("paths".to_string()),
