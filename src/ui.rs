@@ -1,10 +1,10 @@
+use crate::spec_processor::{Method, Status};
 use ratatui::layout::{Alignment, Constraint, Rect};
+use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table};
-use ratatui::{Frame, symbols};
-
-use crate::spec_processor::{Method, Status};
+use ratatui::{symbols, Frame};
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
     let header = Row::new(vec!["    Summary", "Path", "Methods"])
@@ -28,7 +28,9 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
         };
 
         let row_style = if data.status == Status::Selected {
-            Style::default().fg(Color::Green)
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -55,7 +57,11 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
     .block(
         Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .title(format!(" {} endpoints for {}", model.table_items.len(), model.infile))
+            .title(format!(
+                " {} endpoints for {}",
+                model.table_items.len(),
+                model.infile
+            ))
             .title_alignment(Alignment::Center),
     );
 
@@ -86,7 +92,6 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     for method in selected_item.methods.iter() {
         detail_lines.push(styled_method(method));
     }
-    detail_lines.push(Line::from("".to_string()));
 
     let mut refs_lines: Vec<Line> = Vec::new();
     for reference in selected_item.refs.iter() {
@@ -112,10 +117,25 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
         ("↓", "move down"),
     ]);
 
+    let selected_item_count = model
+        .table_items
+        .iter()
+        .filter(|item| item.status == Status::Selected)
+        .count();
+
     let detail = Paragraph::new(Text::from(detail_lines)).block(
         Block::default()
             .border_set(collapsed_top_border_set)
             .borders(Borders::ALL)
+            .title(if selected_item_count > 0 {
+                Line::from(vec![
+                    " ".into(),
+                    selected_item_count.to_string().bold().green().into(),
+                    " endpoints selected ".into(),
+                ])
+            } else {
+                Line::from("")
+            })
             .title_bottom(shortcuts.as_line())
             .title_alignment(Alignment::Right)
             .padding(Padding::new(1, 1, 0, 0)),
@@ -127,52 +147,19 @@ fn styled_method(method: &Method) -> Line {
     let method_str = method.method.to_uppercase();
     let padded_method = format!("{:<6}", method_str);
     let the_method = Span::from(padded_method);
-    match method_str.as_str() {
-        "GET" => Line::from(vec![
-            the_method.style(
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-        "PATCH" => Line::from(vec![
-            the_method.style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-        "POST" => Line::from(vec![
-            the_method.style(
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-        "PUT" => Line::from(vec![
-            the_method.style(
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-        "DELETE" => Line::from(vec![
-            the_method.style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-        _ => Line::from(vec![
-            the_method.style(Style::default().add_modifier(Modifier::ITALIC | Modifier::BOLD)),
-            Span::from(" "),
-            Span::from(method.description.clone()),
-        ]),
-    }
+
+    let method_style = match method_str.as_str() {
+        "GET" => Style::default().fg(Color::Blue),
+        "PATCH" => Style::default().fg(Color::Yellow),
+        "POST" => Style::default().fg(Color::Green),
+        "PUT" => Style::default().fg(Color::Magenta),
+        "DELETE" => Style::default().fg(Color::Red),
+        _ => Style::default().add_modifier(Modifier::ITALIC),
+    };
+
+    Line::from(vec![
+        the_method.style(method_style.add_modifier(Modifier::BOLD)),
+        Span::from(" "),
+        Span::from(method.description.clone()),
+    ])
 }
