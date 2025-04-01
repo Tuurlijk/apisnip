@@ -67,7 +67,7 @@ fn about_str() -> &'static str {
 
                    Trim an API surface down to size
                     Coded with ♥️ by Michiel Roos
-                        {}
+                            {}
 ",
         dynamic_value
     );
