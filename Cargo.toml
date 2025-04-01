@@ -6,7 +6,7 @@ edition = "2021"
 authors = ["Michiel Roos <apisnip.zumble.frap@michielroos.com>"]
 license = "MIT"
 repository = "https://github.com/michielroos/apisnip"
-keywords = ["openapi", "swagger", "api", "tui", "yaml", "json"]
+keywords = ["openapi", "swagger", "api", "tui"]
 categories = ["command-line-utilities", "text-processing"]
 readme = "README.md"
 
