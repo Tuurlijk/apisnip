@@ -47,10 +47,6 @@ pub struct Args {
     /// The name of the output file
     #[clap(default_value = "apisnip.out.yaml")]
     outfile: String,
-
-    /// Enable verbose output
-    #[clap(short = 'v', long, action = clap::ArgAction::SetTrue)]
-    verbose: bool,
 }
 
 fn about_str() -> &'static str {
