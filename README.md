@@ -1,6 +1,8 @@
-# Apisnip
+# ApiSnip
 
 A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size. Apisnip allows you to interactively select which endpoints to keep in your API specification, making it easy to generate smaller, focused API surfaces.
+
+![ApiSnip demo][apisnip.gif]
 
 ## Features
 
@@ -57,3 +59,5 @@ git clone https://github.com/michielroos/apisnip.git
 cd apisnip
 cargo build --release
 ```
+
+[apisnip.gif]: https://github.com/Tuurlijk/apisnip/blob/images/images/apisnip.gif?raw=true
