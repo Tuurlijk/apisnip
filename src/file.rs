@@ -1,5 +1,4 @@
 use color_eyre::eyre::{self, Result};
-use serde_json;
 use serde_yaml::{Mapping, Value};
 use std::fs;
 use std::path::Path;
