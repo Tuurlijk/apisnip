@@ -1,9 +1,9 @@
 [package]
 name = "apisnip"
 description = "Trim an API surface down to size ✂️"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2024"
-authors = ["Michiel Roos <michiel@roos.nu>"]
+authors = ["Michiel Roos <apisnip.zumble.frap@michielroos.com>"]
 license = "MIT"
 repository = "https://github.com/michielroos/apisnip"
 
