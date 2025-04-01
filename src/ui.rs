@@ -130,7 +130,7 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
             .title(if selected_item_count > 0 {
                 Line::from(vec![
                     " ".into(),
-                    selected_item_count.to_string().bold().green().into(),
+                    selected_item_count.to_string().bold().green(),
                     " endpoints selected ".into(),
                 ])
             } else {
