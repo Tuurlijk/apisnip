@@ -111,7 +111,7 @@ fn main() -> color_eyre::Result<()> {
 }
 
 fn view(model: &mut AppModel, frame: &mut Frame) {
-    let [top, bottom] = Layout::vertical([Constraint::Percentage(80), Constraint::Percentage(20)])
+    let [top, bottom] = Layout::vertical([Constraint::Percentage(80), Constraint::Min(10)])
         .areas(frame.area());
     render_table(model, top, frame);
     render_detail(model, bottom, frame);

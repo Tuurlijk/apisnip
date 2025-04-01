@@ -55,7 +55,7 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
     .block(
         Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .title(format!(" Endpoints for {}", model.infile))
+            .title(format!(" {} endpoints for {}", model.table_items.len(), model.infile))
             .title_alignment(Alignment::Center),
     );
 
@@ -106,7 +106,7 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
 
     let shortcuts = crate::shortcuts::Shortcuts::from(vec![
         ("q", "quit"),
-        ("space", "✂️ snip"),
+        ("space", "✂️snip"),
         ("w", "write and quit"),
         ("↑", "move up"),
         ("↓", "move down"),

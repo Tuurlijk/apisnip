@@ -2,19 +2,37 @@ use color_eyre::eyre::{self, Result};
 use serde_yaml::{Mapping, Value};
 use std::fs;
 use std::path::Path;
+use url::Url;
 
 use crate::spec_processor::{Endpoint, Status};
 
 pub fn read_spec(path: &str) -> Result<Mapping> {
-    let input_content = fs::read_to_string(path)?;
+    let input_content = if path.starts_with("http://") || path.starts_with("https://") {
+        // Handle URL
+        let url = Url::parse(path)?;
+        let response = reqwest::blocking::get(url)?;
+        response.text()?
+    } else {
+        // Handle local file
+        fs::read_to_string(path)?
+    };
 
-    // Detect file extension and parse accordingly
-    match Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_lowercase())
-        .as_deref()
-    {
+    // Detect file extension or content type and parse accordingly
+    let extension = if path.starts_with("http://") || path.starts_with("https://") {
+        // Try to get extension from URL
+        Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase())
+    } else {
+        // Get extension from local file
+        Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase())
+    };
+
+    match extension.as_deref() {
         Some("json") => {
             let json_value: serde_json::Value = serde_json::from_str(&input_content)?;
             // Convert JSON to YAML while preserving order
