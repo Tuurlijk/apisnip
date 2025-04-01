@@ -12,17 +12,14 @@ use crossterm::event::{
 };
 use itertools::Itertools;
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState};
 use serde_yaml::{self, Mapping, Value};
 
-static INFO_TEXT: &str = " (q) quit | (space/Enter) toggle select and move to next | (w) write and quit | (↑) move up | (↓) move down | (PageUp/PageDown) move page up/down ";
-
-/// Application data model and state
 #[derive(Debug, Default)]
-struct Model {
+struct AppModel {
     table_items: Vec<Endpoint>,
     table_state: TableState,
     running_state: RunningState,
@@ -39,7 +36,6 @@ enum RunningState {
     Done,
 }
 
-/// Data model
 #[derive(Debug, Default)]
 struct Endpoint {
     methods: Vec<Method>,
@@ -119,9 +115,10 @@ fn main() -> color_eyre::Result<()> {
     tui::install_panic_hook();
     let config = config::get_config();
     let args = Args::parse();
+    stdout().execute(EnableMouseCapture)?;
     let input_yaml = fs::read_to_string(&args.infile)?;
     let spec: Mapping = serde_yaml::from_str(&input_yaml)?;
-    let mut model = Model {
+    let mut model = AppModel {
         infile: args.infile,
         outfile: args.outfile,
         spec: spec,
@@ -129,8 +126,12 @@ fn main() -> color_eyre::Result<()> {
     };
     model.table_items = fetch_endpoints_from_spec(&model.spec);
 
+    // Select the first row if no row is selected
+    if model.table_state.selected().is_none() {
+        model.table_state.select_first();
+    }
+
     let mut terminal = tui::init_terminal()?;
-    stdout().execute(EnableMouseCapture)?;
     while model.running_state != RunningState::Done {
         // Render the current view
         terminal.draw(|f| view(&mut model, f))?;
@@ -241,11 +242,14 @@ fn fetch_refs(value: &Value) -> Vec<String> {
     refs
 }
 
-fn view(model: &mut Model, frame: &mut Frame) {
+fn view(model: &mut AppModel, frame: &mut Frame) {
     let [top, bottom] = Layout::vertical([Constraint::Percentage(80), Constraint::Percentage(20)])
         .areas(frame.area());
+    render_table(model, top, frame);
+    render_detail(model, bottom, frame);
+}
 
-    // Table setup
+fn render_table(model: &mut AppModel, area: Rect, frame: &mut Frame) {
     let header = Row::new(vec!["Summary", "Path", "Methods"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .height(1);
@@ -262,8 +266,8 @@ fn view(model: &mut Model, frame: &mut Frame) {
         }
 
         let description_selection = match data.status {
-            Status::Unselected => format!(" ☐ {}", description),
-            Status::Selected => format!(" ✓ {}", description),
+            Status::Unselected => format!("    {}", description),
+            Status::Selected => format!(" ✂️ {}", description),
         };
 
         let row_style = if data.status == Status::Selected {
@@ -299,16 +303,12 @@ fn view(model: &mut Model, frame: &mut Frame) {
     );
 
     // Store the table area for pagination
-    model.table_area = Some(top);
+    model.table_area = Some(area);
 
-    frame.render_stateful_widget(table, top, &mut model.table_state);
+    frame.render_stateful_widget(table, area, &mut model.table_state);
+}
 
-    // Select the first row if no row is selected
-    if model.table_state.selected().is_none() {
-        model.table_state.select_first();
-    }
-
-    // Detail view
+fn render_detail(model: &AppModel, area: Rect, frame: &mut Frame) {
     let selected_item = &model.table_items[model.table_state.selected().unwrap()];
     let mut description = selected_item.description.clone();
     if description.len() == 0 {
@@ -320,28 +320,37 @@ fn view(model: &mut Model, frame: &mut Frame) {
             .join("/");
     }
 
-    let detail = Paragraph::new(format!(
-        "Methods: {}\n\nPath: {}\n\nRefs:\n- {}",
-        selected_item
-            .methods
-            .iter()
-            .map(|method| method.method.as_str().to_uppercase())
-            .collect::<Vec<String>>()
-            .join(" "),
-        selected_item.path,
-        selected_item.refs.join("\n- ")
-    ))
-    .block(
+    let mut detail_lines: Vec<Line> = Vec::new();
+    detail_lines.push(
+        Line::from(selected_item.path.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
+    );
+    for method in selected_item.methods.iter() {
+        detail_lines.push(styled_method(method));
+    }
+
+    let mut refs_lines: Vec<Line> = Vec::new();
+    for reference in selected_item.refs.iter() {
+        refs_lines.push(Line::from(format!("- {}", reference)));
+    }
+    if refs_lines.len() > 0 {
+        detail_lines.push(Line::from("".to_string()));
+        detail_lines.push(Line::from("Refs:".to_string()));
+        detail_lines.extend(refs_lines);
+    }
+
+    let detail = Paragraph::new(Text::from(detail_lines)).block(
         Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", description))
-            .title_bottom(Line::from(INFO_TEXT))
-            .padding(Padding::new(1, 1, 1, 1)),
+            .title_bottom(
+                " (q) quit | (space) select | (w) write and quit | (↑) move up | (↓) move down ",
+            )
+            .padding(Padding::new(1, 1, 0, 0)),
     );
-    frame.render_widget(detail, bottom);
+    frame.render_widget(detail, area);
 }
 
-fn handle_event(_: &Model) -> color_eyre::Result<Option<Message>> {
+fn handle_event(_: &AppModel) -> color_eyre::Result<Option<Message>> {
     if event::poll(Duration::from_millis(250))? {
         match event::read()? {
             Event::Key(key) if key.kind == event::KeyEventKind::Press => Ok(handle_key(key)),
@@ -359,9 +368,7 @@ const fn handle_key(key: event::KeyEvent) -> Option<Message> {
         KeyCode::Char('k') | KeyCode::Up => Some(Message::SelectPrevious),
         KeyCode::Char('q') => Some(Message::Quit),
         KeyCode::Char('w') => Some(Message::WriteAndQuit),
-        KeyCode::Char(' ') | KeyCode::Right | KeyCode::Enter => {
-            Some(Message::ToggleSelectItemAndSelectNext)
-        }
+        KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
         KeyCode::PageDown => Some(Message::SelectNextPage),
         KeyCode::PageUp => Some(Message::SelectPreviousPage),
         _ => None,
@@ -377,7 +384,7 @@ const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
     }
 }
 
-fn update(model: &mut Model, msg: Message) -> Option<Message> {
+fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
     match msg {
         Message::WriteAndQuit => {
             write_spec_to_file(&model).unwrap_or_else(|e| {
@@ -443,7 +450,7 @@ fn update(model: &mut Model, msg: Message) -> Option<Message> {
     None
 }
 
-fn write_spec_to_file(model: &Model) -> color_eyre::Result<()> {
+fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
     // Get selected items
     let selected_items: Vec<&Endpoint> = model
         .table_items
@@ -488,7 +495,7 @@ fn write_spec_to_file(model: &Model) -> color_eyre::Result<()> {
     Ok(())
 }
 
-fn calculate_visible_table_rows(model: &Model) -> u16 {
+fn calculate_visible_table_rows(model: &AppModel) -> u16 {
     // Each row is 1 line high, header is 1 line, borders are 2 lines
     let total_rows = model.table_items.len() as u16;
     let visible_rows = model
@@ -496,6 +503,60 @@ fn calculate_visible_table_rows(model: &Model) -> u16 {
         .map(|area| area.height.saturating_sub(3))
         .unwrap_or(1);
     visible_rows.min(total_rows)
+}
+
+fn styled_method(method: &Method) -> Line {
+    let method_str = method.method.to_uppercase();
+    let padded_method = format!("{:<6}", method_str);
+    let the_method = Span::from(padded_method);
+    match method_str.as_str() {
+        "GET" => Line::from(vec![
+            the_method.style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+        "PATCH" => Line::from(vec![
+            the_method.style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+        "POST" => Line::from(vec![
+            the_method.style(
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+        "PUT" => Line::from(vec![
+            the_method.style(
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+        "DELETE" => Line::from(vec![
+            the_method.style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+        _ => Line::from(vec![
+            the_method.style(Style::default().add_modifier(Modifier::ITALIC | Modifier::BOLD)),
+            Span::from(" "),
+            Span::from(method.description.clone()),
+        ]),
+    }
 }
 
 mod tui {

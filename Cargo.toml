@@ -1,12 +1,11 @@
 [package]
 name = "apisnip"
-description = "Trim an API surface down to size"
+description = "Trim an API surface down to size ✂️"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 openapi = "0.1"
-#indexmap = { version = "2.0", features = ["serde"] }  # Preserves YAML order
 clap = { version = "4.5.32", features = ["derive"] }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 ratatui = "0.29.0"
