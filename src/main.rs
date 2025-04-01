@@ -119,7 +119,7 @@ fn main() -> color_eyre::Result<()> {
     let mut model = AppModel {
         infile: args.infile,
         outfile: args.outfile,
-        spec: spec,
+        spec,
         ..Default::default()
     };
     model.table_items = fetch_endpoints_from_spec(&model.spec);
@@ -150,7 +150,7 @@ fn main() -> color_eyre::Result<()> {
 fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
     let mut table_items: Vec<Endpoint> = Vec::new();
     let paths = spec
-        .get(&Value::String("paths".to_string()))
+        .get(Value::String("paths".to_string()))
         .and_then(|v| v.as_mapping())
         .ok_or_eyre("No 'paths' field found or it's not a mapping")
         .unwrap();
@@ -179,24 +179,24 @@ fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
                 table_item.description = op.as_str().unwrap_or("").to_string();
                 continue;
             }
-            if method_str == "description" && table_item.description.len() == 0 {
+            if method_str == "description" && table_item.description.is_empty() {
                 table_item.description = op.as_str().unwrap_or("").to_string();
                 continue;
             }
             let summary = op
                 .as_mapping()
-                .and_then(|m| m.get(&Value::String("summary".to_string())))
+                .and_then(|m| m.get(Value::String("summary".to_string())))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             let description = op
                 .as_mapping()
-                .and_then(|m| m.get(&Value::String("description".to_string())))
+                .and_then(|m| m.get(Value::String("description".to_string())))
                 .and_then(|v| v.as_str())
                 .unwrap_or("No description")
                 .to_string();
             method.method = method_str.to_string();
-            method.description = if summary.len() > 0 {
+            method.description = if !summary.is_empty() {
                 summary
             } else {
                 description
@@ -223,7 +223,7 @@ fn fetch_all_references(value: &Value) -> Vec<String> {
     match value {
         Value::Mapping(map) => {
             // Check if this mapping has a $ref key
-            if let Some(Value::String(ref_str)) = map.get(&Value::String("$ref".to_string())) {
+            if let Some(Value::String(ref_str)) = map.get(Value::String("$ref".to_string())) {
                 refs.push(ref_str.clone());
             }
             // Recurse into all values in the mapping
@@ -256,7 +256,7 @@ fn render_table(model: &mut AppModel, area: Rect, frame: &mut Frame) {
 
     let rows = model.table_items.iter().map(|data| {
         let mut description = data.description.clone();
-        if description.len() == 0 {
+        if description.is_empty() {
             description = data
                 .methods
                 .iter()
@@ -311,7 +311,7 @@ fn render_table(model: &mut AppModel, area: Rect, frame: &mut Frame) {
 fn render_detail(model: &AppModel, area: Rect, frame: &mut Frame) {
     let selected_item = &model.table_items[model.table_state.selected().unwrap()];
     let mut description = selected_item.description.clone();
-    if description.len() == 0 {
+    if description.is_empty() {
         description = selected_item
             .methods
             .iter()
@@ -335,7 +335,7 @@ fn render_detail(model: &AppModel, area: Rect, frame: &mut Frame) {
     for reference in selected_item.refs.iter() {
         refs_lines.push(Line::from(format!("- {}", reference)));
     }
-    if refs_lines.len() > 0 {
+    if !refs_lines.is_empty() {
         detail_lines.push(Line::from("".to_string()));
         detail_lines.push(Line::from("Component schemas:".to_string()));
         detail_lines.extend(refs_lines);
@@ -403,7 +403,7 @@ const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
 fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
     match msg {
         Message::WriteAndQuit => {
-            write_spec_to_file(&model).unwrap_or_else(|e| {
+            write_spec_to_file(model).unwrap_or_else(|e| {
                 eprintln!("Failed to write spec to file: {}", e);
                 model.running_state = RunningState::Done;
             });
@@ -475,14 +475,14 @@ fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
     // Get the original paths and operations from spec
     let original_path_specifications = model
         .spec
-        .get(&Value::String("paths".to_string()))
+        .get(Value::String("paths".to_string()))
         .and_then(|v| v.as_mapping())
         .unwrap();
 
     // Create paths mapping with only selected paths, keeping their original data
     let mut paths = Mapping::new();
     for item in selected_items {
-        if let Some(path_data) = original_path_specifications.get(&Value::String(item.path.clone()))
+        if let Some(path_data) = original_path_specifications.get(Value::String(item.path.clone()))
         {
             paths.insert(Value::String(item.path.clone()), path_data.clone());
         }
@@ -493,8 +493,7 @@ fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
         .table_items
         .iter()
         .filter(|item| item.status == Status::Selected)
-        .map(|item| item.refs.clone())
-        .flatten()
+        .flat_map(|item| item.refs.clone())
         .unique()
         .collect::<Vec<String>>();
 
@@ -503,7 +502,7 @@ fn write_spec_to_file(model: &AppModel) -> color_eyre::Result<()> {
     let mut all_references_to_preserve = Vec::new();
     let components = model
         .spec
-        .get(&Value::String("components".to_string()))
+        .get(Value::String("components".to_string()))
         .and_then(|v| v.as_mapping())
         .unwrap();
     for (key, value) in components {
