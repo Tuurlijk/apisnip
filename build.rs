@@ -1,4 +1,3 @@
-use regex;
 
 fn main() {
     let git_output = std::process::Command::new("git")
