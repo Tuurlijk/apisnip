@@ -26,7 +26,7 @@ impl<'a> LogsWidget<'a> {
     }
 }
 
-impl<'a> StatefulWidget for LogsWidget<'a> {
+impl StatefulWidget for LogsWidget<'_> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
