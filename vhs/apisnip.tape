@@ -7,7 +7,7 @@ Set Width 1200
 Set Height 768
 Set FontSize 16
 Set BorderRadius 10
-Set TypingSpeed 20ms
+Set TypingSpeed 10ms
 Set Padding 20
 Type "apisnip https://raw.githubusercontent.com/swagger-api/swagger-petstore/refs/heads/master/src/main/resources/openapi.yaml"
 Enter
