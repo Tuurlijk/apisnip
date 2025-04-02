@@ -24,20 +24,20 @@ Sleep 1s
 Type " "
 Up 1
 Sleep 1s
+Type "/"
+Sleep 1s
+Type "tags"
+Sleep 1s
+Type " "
+Sleep 1s
+Escape
+Sleep 1s
 Type "w"
 Set TypingSpeed 100ms
 Type "cat apisnip.out.yaml | more"
 Sleep 1s
 Set TypingSpeed 1s
 Enter
-Sleep 2s
-Type " "
-Sleep 2s
-Type " "
-Sleep 2s
-Type " "
-Sleep 2s
-Type " "
 Sleep 2s
 Type " "
 Sleep 2s
