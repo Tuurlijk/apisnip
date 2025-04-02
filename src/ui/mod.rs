@@ -154,15 +154,16 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     };
 
     let shortcuts = Shortcuts::from(vec![
-        ("Esc", "exit search"),
+        ("q", "quit"),
         ("space", "✂️snip"),
-        ("Home", "to top"),
         ("w", "write and quit"),
         ("↑", "move up"),
         ("↓", "move down"),
         ("/", "search"),
         ("Esc", "exit search"),
-    ]);
+        ("Home", "to top"),
+    ])
+    .with_alignment(Alignment::Right);
 
     let selected_item_count = model
         .table_items

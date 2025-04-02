@@ -144,7 +144,7 @@ fn view(model: &mut AppModel, frame: &mut Frame) {
         let [top, search, bottom] = Layout::vertical([
             Constraint::Percentage(80),
             Constraint::Length(2),
-            Constraint::Min(9),
+            Constraint::Min(10),
         ])
             .areas(frame.area());
         render_table(model, top, frame);
@@ -153,7 +153,7 @@ fn view(model: &mut AppModel, frame: &mut Frame) {
     } else {
         let [top, bottom] = Layout::vertical([
             Constraint::Percentage(80),
-            Constraint::Min(9),
+            Constraint::Min(10),
         ])            .areas(frame.area());
         render_table(model, top, frame);
         render_detail(model, bottom, frame);
