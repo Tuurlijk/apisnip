@@ -34,6 +34,11 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
     if model.search_state.active {
         match key.code {
             KeyCode::Esc => Some(Message::HideSearch),
+            KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
+            KeyCode::Up => Some(Message::SelectPrevious),
+            KeyCode::Down => Some(Message::SelectNext),
+            KeyCode::PageDown => Some(Message::SelectNextPage),
+            KeyCode::PageUp => Some(Message::SelectPreviousPage),
             _ => Some(Message::KeyPress(key)),
         }
     } else {

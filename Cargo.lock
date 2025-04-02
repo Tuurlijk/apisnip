@@ -99,13 +99,14 @@ dependencies = [
 
 [[package]]
 name = "apisnip"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "chrono",
  "clap",
  "color-eyre",
  "crossterm",
  "eyre",
+ "fuzzy-matcher",
  "indexmap",
  "itertools 0.14.0",
  "ratatui",
@@ -519,6 +520,15 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+]
+
+[[package]]
+name = "fuzzy-matcher"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
+dependencies = [
+ "thread_local",
 ]
 
 [[package]]

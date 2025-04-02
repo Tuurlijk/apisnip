@@ -9,6 +9,8 @@ use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::ExecutableCommand;
 use event::{handle_event, Message};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::TableState;
 use ratatui::Frame;
@@ -17,7 +19,19 @@ use spec_processor::{Endpoint, Status};
 use tui_textarea::TextArea;
 use crate::ui::{render_detail, render_search, render_table};
 
-#[derive(Debug, Default)]
+#[derive(Default, Clone)]
+pub struct SearchState {
+    pub(crate) active: bool,
+    pub(crate) text_input: TextArea<'static>,
+}
+
+#[derive(Default, PartialEq, Eq)]
+enum RunningState {
+    #[default]
+    Running,
+    Done,
+}
+
 struct AppModel {
     infile: String,
     outfile: String,
@@ -25,22 +39,27 @@ struct AppModel {
     spec: Mapping,
     table_area: Option<ratatui::layout::Rect>,
     table_items: Vec<Endpoint>,
+    table_items_backup: Option<Vec<Endpoint>>,
     table_state: TableState,
     search_state: SearchState,
+    matcher: SkimMatcherV2,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct SearchState {
-    pub(crate) active: bool,
-    pub(crate) query: String,
-    pub(crate) text_input: TextArea<'static>,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-enum RunningState {
-    #[default]
-    Running,
-    Done,
+impl Default for AppModel {
+    fn default() -> Self {
+        Self {
+            infile: String::new(),
+            outfile: String::new(),
+            running_state: RunningState::default(),
+            spec: Mapping::new(),
+            table_area: None,
+            table_items: Vec::new(),
+            table_items_backup: None,
+            table_state: TableState::default(),
+            search_state: SearchState::default(),
+            matcher: SkimMatcherV2::default(),
+        }
+    }
 }
 
 /// Trim an API surface down to size
@@ -93,6 +112,7 @@ fn main() -> color_eyre::Result<()> {
         ..Default::default()
     };
     model.table_items = spec_processor::fetch_endpoints_from_spec(&model.spec);
+    // Don't preemptively create backup, only when search starts
 
     // Select the first row if no row is selected
     if model.table_state.selected().is_none() {
@@ -154,12 +174,20 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             model.running_state = RunningState::Done;
         }
         Message::SelectNext => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            
             let current_index = model.table_state.selected().unwrap_or(0);
             if current_index < model.table_items.len() - 1 {
                 model.table_state.select(Some(current_index + 1));
             }
         }
         Message::SelectPrevious => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            
             let current_index = model.table_state.selected().unwrap_or(0);
             if current_index > 0 {
                 model.table_state.select(Some(current_index - 1));
@@ -184,33 +212,140 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             }
         }
         Message::ToggleSelectItemAndSelectNext => {
-            let current_index = model.table_state.selected().unwrap_or(0);
-            model.table_items[current_index].status =
-                if model.table_items[current_index].status == Status::Selected {
-                    Status::Unselected
-                } else {
-                    Status::Selected
-                };
+            // Skip if table_items is empty or no selection
+            if model.table_items.is_empty() || model.table_state.selected().is_none() {
+                return None;
+            }
+            
+            let current_index = model.table_state.selected().unwrap();
+            
+            // Check for valid index
+            if current_index >= model.table_items.len() {
+                return None;
+            }
+            
+            // Get the path of the current item (unique identifier)
+            let path = model.table_items[current_index].path.clone();
+            
+            // Toggle status in current table items
+            model.table_items[current_index].status = if model.table_items[current_index].status == Status::Selected {
+                Status::Unselected
+            } else {
+                Status::Selected
+            };
+            
+            // Toggle the same item in the backup if it exists
+            if let Some(backup) = &mut model.table_items_backup {
+                if let Some(pos) = backup.iter().position(|item| item.path == path) {
+                    backup[pos].status = model.table_items[current_index].status;
+                }
+            }
+            
+            // Move to next item if possible
             if current_index < model.table_items.len() - 1 {
                 model.table_state.select(Some(current_index + 1));
             }
         }
         Message::SelectNextPage => {
-            let visible_rows = calculate_visible_table_rows(model);
-            model.table_state.scroll_down_by(visible_rows);
+            if !model.table_items.is_empty() {
+                let visible_rows = calculate_visible_table_rows(model);
+                model.table_state.scroll_down_by(visible_rows);
+            }
         }
         Message::SelectPreviousPage => {
-            let visible_rows = calculate_visible_table_rows(model);
-            model.table_state.scroll_up_by(visible_rows);
+            if !model.table_items.is_empty() {
+                let visible_rows = calculate_visible_table_rows(model);
+                model.table_state.scroll_up_by(visible_rows);
+            }
         }
         Message::ShowSearch => {
             model.search_state.active = true;
+            model.search_state.text_input = TextArea::default();
+            
+            // Backup the current table items if not already backed up
+            if model.table_items_backup.is_none() {
+                model.table_items_backup = Some(model.table_items.clone());
+            }
         }
         Message::HideSearch => {
             model.search_state.active = false;
+            model.search_state.text_input = TextArea::default();
+            
+            // Simply restore the items from backup
+            // Selections have already been updated in the backup when toggling
+            if let Some(backup) = &model.table_items_backup {
+                model.table_items = backup.clone();
+            }
+            
+            // Note: we're keeping the backup for future search sessions
+            // This way selections are preserved across search sessions
+            
+            // Ensure valid selection
+            if model.table_items.is_empty() {
+                model.table_state.select(None);
+            } else if let Some(selected) = model.table_state.selected() {
+                if selected >= model.table_items.len() {
+                    model.table_state.select(Some(0));
+                }
+            }
         }
         Message::KeyPress(key) => {
             model.search_state.text_input.input(key);
+            if model.search_state.active {
+                let query = model.search_state.text_input.lines()[0].to_lowercase();
+                
+                // Ensure we have a backup of the original items
+                if model.table_items_backup.is_none() {
+                    model.table_items_backup = Some(model.table_items.clone());
+                }
+                
+                let backup = model.table_items_backup.as_ref().unwrap();
+                
+                if query.is_empty() {
+                    // Reset to all items when search is empty
+                    // Selection states are already in the backup
+                    model.table_items = backup.clone();
+                } else {
+                    // Filter items based on fuzzy matching with weighted scores
+                    let mut scored_items = backup
+                        .iter()
+                        .filter_map(|item| {
+                            let path_score = model.matcher.fuzzy_match(&item.path.to_lowercase(), &query);
+                            let desc_score = model.matcher.fuzzy_match(&item.description.to_lowercase(), &query);
+                            
+                            // Weight path_score twice as much as desc_score
+                            // Only include items that have at least one match
+                            match (path_score, desc_score) {
+                                (Some(p), Some(d)) => Some((item, p * 2 + d)),  // Both match
+                                (Some(p), None) => Some((item, p * 2)),         // Only path matches
+                                (None, Some(d)) => Some((item, d)),             // Only description matches
+                                (None, None) => None,                           // No match
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    
+                    // Sort by score in descending order
+                    scored_items.sort_by(|a, b| b.1.cmp(&a.1));
+                    
+                    // Extract just the items
+                    model.table_items = scored_items
+                        .into_iter()
+                        .map(|(item, _)| item.clone())
+                        .collect();
+                }
+                
+                // Reset selection if it's out of bounds or list is empty
+                if model.table_items.is_empty() {
+                    model.table_state.select(None);
+                } else if let Some(selected) = model.table_state.selected() {
+                    if selected >= model.table_items.len() {
+                        model.table_state.select(Some(0));
+                    }
+                } else {
+                    // No selection but we have items, select the first one
+                    model.table_state.select(Some(0));
+                }
+            }
         }
     };
     None

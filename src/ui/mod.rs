@@ -1,17 +1,34 @@
 pub mod widget;
 
-use crate::ui::widget::Shortcuts;
 use crate::spec_processor::{Method, Status};
+use crate::ui::widget::Shortcuts;
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Padding, Paragraph, Row, Table,
-};
+use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Row, Table};
 use ratatui::{symbols, Frame};
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
+    // Store the table area for pagination
+    model.table_area = Some(area);
+
+    // Handle the case when there are no items to display
+    if model.table_items.is_empty() {
+        let no_items = Paragraph::new("No items match your search.")
+            .block(
+                Block::default()
+                    .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+                    .border_type(BorderType::Rounded)
+                    .title(format!(" 0 endpoints for {} ", model.infile))
+                    .title_alignment(Alignment::Center),
+            )
+            .alignment(Alignment::Center);
+
+        frame.render_widget(no_items, area);
+        return;
+    }
+
     let header = Row::new(vec!["    Summary", "Path", "Methods"])
         .style(Style::default().add_modifier(Modifier::BOLD))
         .height(1);
@@ -71,14 +88,31 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
             .title_alignment(Alignment::Center),
     );
 
-    // Store the table area for pagination
-    model.table_area = Some(area);
-
     frame.render_stateful_widget(table, area, &mut model.table_state);
 }
 
 pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
-    let selected_item = &model.table_items[model.table_state.selected().unwrap()];
+    // Check if we have any items to display and a valid selection
+    if model.table_items.is_empty() || model.table_state.selected().is_none() {
+        // Render an empty detail view with a message
+        let detail = Paragraph::new("No items selected or search results are empty.")
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(detail, area);
+        return;
+    }
+
+    let selected_idx = model.table_state.selected().unwrap();
+
+    // Ensure the selected index is valid
+    if selected_idx >= model.table_items.len() {
+        // Render an empty detail view with error message
+        let detail = Paragraph::new("Invalid selection index.")
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(detail, area);
+        return;
+    }
+
+    let selected_item = &model.table_items[selected_idx];
     let mut description = selected_item.description.clone();
     if description.is_empty() {
         description = selected_item

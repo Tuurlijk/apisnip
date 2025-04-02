@@ -2,7 +2,7 @@ use color_eyre::eyre::{OptionExt, Result};
 use itertools::Itertools;
 use serde_yaml::{Mapping, Value};
 
-#[derive(Debug, Default)]
+#[derive(Default, Clone)]
 pub struct Endpoint {
     pub methods: Vec<Method>,
     pub path: String,
@@ -11,14 +11,14 @@ pub struct Endpoint {
     pub status: Status,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
 pub enum Status {
     #[default]
     Unselected,
     Selected,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default, Clone)]
 pub struct Method {
     pub method: String,
     pub description: String,
