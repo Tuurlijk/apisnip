@@ -41,6 +41,7 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
             KeyCode::PageDown => Some(Message::SelectNextPage),
             KeyCode::PageUp => Some(Message::SelectPreviousPage),
             KeyCode::Home => Some(Message::GoToTop),
+            KeyCode::Enter => None,
             _ => Some(Message::KeyPress(key)),
         }
     } else {
