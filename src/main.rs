@@ -160,6 +160,109 @@ fn view(model: &mut AppModel, frame: &mut Frame) {
     }
 }
 
+impl AppModel {
+    // Helper method to maintain selection when items are reordered
+    fn maintain_selection(&mut self, path_to_follow: &str) {
+        if let Some(new_idx) = self.table_items.iter().position(|item| item.path == path_to_follow) {
+            self.table_state.select(Some(new_idx));
+        }
+    }
+    
+    // Helper method to ensure selection is valid
+    fn ensure_valid_selection(&mut self) {
+        if self.table_items.is_empty() {
+            self.table_state.select(None);
+        } else if let Some(selected) = self.table_state.selected() {
+            if selected >= self.table_items.len() {
+                self.table_state.select(Some(0));
+            }
+        } else if !self.table_items.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+    
+    // Helper to update item status in both table_items and backup
+    fn toggle_item_status(&mut self, index: usize) -> (String, Status) {
+        let path = self.table_items[index].path.clone();
+        let new_status = if self.table_items[index].status == Status::Selected {
+            Status::Unselected
+        } else {
+            Status::Selected
+        };
+        
+        // Update in current display
+        self.table_items[index].status = new_status;
+        
+        // Update in backup if it exists
+        if let Some(backup) = &mut self.table_items_backup {
+            if let Some(pos) = backup.iter().position(|item| item.path == path) {
+                backup[pos].status = new_status;
+            }
+        }
+        
+        (path, new_status)
+    }
+    
+    // Filter items based on query and maintain selection
+    fn filter_items(&mut self, query: &str) {
+        // Remember current selection
+        let selected_path = self.table_state.selected()
+            .and_then(|idx| self.table_items.get(idx))
+            .map(|item| item.path.clone());
+        
+        // Ensure backup exists
+        if self.table_items_backup.is_none() {
+            self.table_items_backup = Some(self.table_items.clone());
+        }
+        
+        let backup = self.table_items_backup.as_ref().unwrap();
+        
+        if query.is_empty() {
+            // Reset to full list when query is empty
+            self.table_items = backup.clone();
+            sort_items_selected_first(&mut self.table_items);
+        } else {
+            // Filter with weighted scoring
+            let mut scored_items = backup
+                .iter()
+                .filter_map(|item| {
+                    let path_score = self.matcher.fuzzy_match(&item.path.to_lowercase(), query);
+                    let desc_score = self.matcher.fuzzy_match(&item.description.to_lowercase(), query);
+                    
+                    match (path_score, desc_score) {
+                        (Some(p), Some(d)) => Some((item, p * 2 + d)),  // Path counts double
+                        (Some(p), None)    => Some((item, p * 2)),
+                        (None, Some(d))    => Some((item, d)),
+                        (None, None)       => None,
+                    }
+                })
+                .collect::<Vec<_>>();
+            
+            // Sort: selected first, then by score
+            scored_items.sort_by(|a, b| {
+                match (a.0.status, b.0.status) {
+                    (Status::Selected, Status::Unselected) => std::cmp::Ordering::Less,
+                    (Status::Unselected, Status::Selected) => std::cmp::Ordering::Greater,
+                    _ => b.1.cmp(&a.1), // Higher score first
+                }
+            });
+            
+            // Extract just items
+            self.table_items = scored_items
+                .into_iter()
+                .map(|(item, _)| item.clone())
+                .collect();
+        }
+        
+        // Try to maintain selection
+        if let Some(path) = selected_path {
+            self.maintain_selection(&path);
+        }
+        
+        self.ensure_valid_selection();
+    }
+}
+
 fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
     match msg {
         Message::WriteAndQuit => {
@@ -169,10 +272,30 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
                     model.running_state = RunningState::Done;
                 });
             model.running_state = RunningState::Done;
+            None
         }
+        
         Message::Quit => {
             model.running_state = RunningState::Done;
+            None
         }
+        
+        Message::GoToTop => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            
+            // Reset to first item and scroll to the top
+            model.table_state.select(Some(0));
+            
+            // Scroll all the way to the top
+            let current_offset = model.table_state.offset();
+            if current_offset > 0 {
+                model.table_state.scroll_up_by(current_offset as u16);
+            }
+            None
+        }
+        
         Message::SelectNext => {
             if model.table_items.is_empty() {
                 return None;
@@ -182,7 +305,9 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             if current_index < model.table_items.len() - 1 {
                 model.table_state.select(Some(current_index + 1));
             }
+            None
         }
+        
         Message::SelectPrevious => {
             if model.table_items.is_empty() {
                 return None;
@@ -192,72 +317,86 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             if current_index > 0 {
                 model.table_state.select(Some(current_index - 1));
             }
+            None
         }
+        
         Message::SelectRow(row) => {
-            // Subtract 2 because first row is border and the second row is the header
-            let row_offset = 2;
-            let last_index = model
-                .table_area
+            // Skip if clicked outside the table content area
+            let row_offset = 2; // First row is border, second is header
+            let last_index = model.table_area
                 .map(|area| area.height.saturating_sub(1))
                 .unwrap_or(1);
-            // If the row is less than the offset, or greater than the last index, we don't need to process the message
+                
             if row < row_offset || row > last_index {
                 return None;
             }
+            
             let row_index = row - row_offset;
-            let scroll_offset: usize = model.table_state.offset();
-            let actual_index = row_index + scroll_offset as u16;
-            if actual_index < model.table_items.len() as u16 {
-                model.table_state.select(Some(actual_index as usize));
+            let scroll_offset = model.table_state.offset();
+            let actual_index = (row_index + scroll_offset as u16) as usize;
+            
+            if actual_index < model.table_items.len() {
+                model.table_state.select(Some(actual_index));
             }
+            None
         }
+        
         Message::ToggleSelectItemAndSelectNext => {
-            // Skip if table_items is empty or no selection
+            // Skip if no selection or empty list
             if model.table_items.is_empty() || model.table_state.selected().is_none() {
                 return None;
             }
             
             let current_index = model.table_state.selected().unwrap();
-            
-            // Check for valid index
             if current_index >= model.table_items.len() {
                 return None;
             }
             
-            // Get the path of the current item (unique identifier)
-            let path = model.table_items[current_index].path.clone();
-            
-            // Toggle status in current table items
-            model.table_items[current_index].status = if model.table_items[current_index].status == Status::Selected {
-                Status::Unselected
+            // Remember next item's path before changes
+            let next_item_path = if current_index < model.table_items.len() - 1 {
+                Some(model.table_items[current_index + 1].path.clone())
             } else {
-                Status::Selected
+                None
             };
             
-            // Toggle the same item in the backup if it exists
-            if let Some(backup) = &mut model.table_items_backup {
-                if let Some(pos) = backup.iter().position(|item| item.path == path) {
-                    backup[pos].status = model.table_items[current_index].status;
-                }
-            }
+            // Toggle status of current item
+            let (current_path, _) = model.toggle_item_status(current_index);
             
-            // Move to next item if possible
+            // Move to next item before reordering
             if current_index < model.table_items.len() - 1 {
                 model.table_state.select(Some(current_index + 1));
             }
+            
+            // Reorder items if not in search mode
+            if !model.search_state.active {
+                // Use next item for focus if available, otherwise use current
+                let focused_path = next_item_path.unwrap_or(current_path);
+                
+                // Sort selected items to top
+                sort_items_selected_first(&mut model.table_items);
+                
+                // Maintain selection on the focused item
+                model.maintain_selection(&focused_path);
+            }
+            None
         }
+        
         Message::SelectNextPage => {
             if !model.table_items.is_empty() {
                 let visible_rows = calculate_visible_table_rows(model);
                 model.table_state.scroll_down_by(visible_rows);
             }
+            None
         }
+        
         Message::SelectPreviousPage => {
             if !model.table_items.is_empty() {
                 let visible_rows = calculate_visible_table_rows(model);
                 model.table_state.scroll_up_by(visible_rows);
             }
+            None
         }
+        
         Message::ShowSearch => {
             model.search_state.active = true;
             model.search_state.text_input = TextArea::default();
@@ -266,89 +405,56 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             if model.table_items_backup.is_none() {
                 model.table_items_backup = Some(model.table_items.clone());
             }
+            None
         }
+        
         Message::HideSearch => {
+            // Remember current selection
+            let selected_path = model.table_state.selected()
+                .and_then(|idx| model.table_items.get(idx))
+                .map(|item| item.path.clone());
+            
             model.search_state.active = false;
             model.search_state.text_input = TextArea::default();
             
-            // Simply restore the items from backup
-            // Selections have already been updated in the backup when toggling
+            // Restore items and sort selected to top
             if let Some(backup) = &model.table_items_backup {
                 model.table_items = backup.clone();
+                sort_items_selected_first(&mut model.table_items);
             }
             
-            // Note: we're keeping the backup for future search sessions
-            // This way selections are preserved across search sessions
-            
-            // Ensure valid selection
-            if model.table_items.is_empty() {
-                model.table_state.select(None);
-            } else if let Some(selected) = model.table_state.selected() {
-                if selected >= model.table_items.len() {
-                    model.table_state.select(Some(0));
-                }
+            // Try to maintain selection
+            if let Some(path) = selected_path {
+                model.maintain_selection(&path);
             }
+            
+            model.ensure_valid_selection();
+            None
         }
+        
         Message::KeyPress(key) => {
             model.search_state.text_input.input(key);
+            
             if model.search_state.active {
-                let query = model.search_state.text_input.lines()[0].to_lowercase();
+                let query = model.search_state.text_input.lines()
+                    .get(0)
+                    .map(|s| s.to_lowercase())
+                    .unwrap_or_default();
                 
-                // Ensure we have a backup of the original items
-                if model.table_items_backup.is_none() {
-                    model.table_items_backup = Some(model.table_items.clone());
-                }
-                
-                let backup = model.table_items_backup.as_ref().unwrap();
-                
-                if query.is_empty() {
-                    // Reset to all items when search is empty
-                    // Selection states are already in the backup
-                    model.table_items = backup.clone();
-                } else {
-                    // Filter items based on fuzzy matching with weighted scores
-                    let mut scored_items = backup
-                        .iter()
-                        .filter_map(|item| {
-                            let path_score = model.matcher.fuzzy_match(&item.path.to_lowercase(), &query);
-                            let desc_score = model.matcher.fuzzy_match(&item.description.to_lowercase(), &query);
-                            
-                            // Weight path_score twice as much as desc_score
-                            // Only include items that have at least one match
-                            match (path_score, desc_score) {
-                                (Some(p), Some(d)) => Some((item, p * 2 + d)),  // Both match
-                                (Some(p), None) => Some((item, p * 2)),         // Only path matches
-                                (None, Some(d)) => Some((item, d)),             // Only description matches
-                                (None, None) => None,                           // No match
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    
-                    // Sort by score in descending order
-                    scored_items.sort_by(|a, b| b.1.cmp(&a.1));
-                    
-                    // Extract just the items
-                    model.table_items = scored_items
-                        .into_iter()
-                        .map(|(item, _)| item.clone())
-                        .collect();
-                }
-                
-                // Reset selection if it's out of bounds or list is empty
-                if model.table_items.is_empty() {
-                    model.table_state.select(None);
-                } else if let Some(selected) = model.table_state.selected() {
-                    if selected >= model.table_items.len() {
-                        model.table_state.select(Some(0));
-                    }
-                } else {
-                    // No selection but we have items, select the first one
-                    model.table_state.select(Some(0));
-                }
+                model.filter_items(&query);
             }
+            None
         }
-    };
-    None
+    }
+}
+
+// Helper function to sort items with selected ones at the top
+fn sort_items_selected_first(items: &mut Vec<Endpoint>) {
+    items.sort_by(|a, b| match (a.status, b.status) {
+        (Status::Selected, Status::Unselected) => std::cmp::Ordering::Less,
+        (Status::Unselected, Status::Selected) => std::cmp::Ordering::Greater,
+        _ => a.path.cmp(&b.path), // Sort by path when selection status is the same
+    });
 }
 
 fn calculate_visible_table_rows(model: &AppModel) -> u16 {

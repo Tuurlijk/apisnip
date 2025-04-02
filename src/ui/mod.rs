@@ -156,6 +156,7 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     let shortcuts = Shortcuts::from(vec![
         ("Esc", "exit search"),
         ("space", "✂️snip"),
+        ("Home", "to top"),
         ("w", "write and quit"),
         ("↑", "move up"),
         ("↓", "move down"),

@@ -16,6 +16,7 @@ pub enum Message {
     SelectPreviousPage,
     WriteAndQuit,
     Quit,
+    GoToTop,
 }
 
 pub fn handle_event(model: &mut AppModel) -> Result<Option<Message>> {
@@ -39,6 +40,7 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
             KeyCode::Down => Some(Message::SelectNext),
             KeyCode::PageDown => Some(Message::SelectNextPage),
             KeyCode::PageUp => Some(Message::SelectPreviousPage),
+            KeyCode::Home => Some(Message::GoToTop),
             _ => Some(Message::KeyPress(key)),
         }
     } else {
@@ -54,6 +56,7 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
             KeyCode::Esc => Some(Message::HideSearch),
             KeyCode::PageDown => Some(Message::SelectNextPage),
             KeyCode::PageUp => Some(Message::SelectPreviousPage),
+            KeyCode::Home => Some(Message::GoToTop),
             _ => None,
         }
     }

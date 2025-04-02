@@ -14,9 +14,10 @@ A terminal user interface (TUI) tool for trimming OpenAPI specifications down to
 - 🌈 Beautiful syntax highlighting for HTTP methods
 - 🔍 Powerful fuzzy search with weighted scoring
 - 🖱️ Click-to-select in the table view
-- ⚡ Fast navigation with Page Up/Down
+- ⚡ Fast navigation with Page Up/Down and Home keys
 - 🚀 Optimized for large API specifications
 - 🌐 Support for remote API specifications via URLs
+- 📊 Selected endpoints automatically grouped at the top
 
 ## 🔧 Installation
 
@@ -46,6 +47,7 @@ apisnip input [output.yaml]
 - `Esc`: Exit search mode
 - `Page Up`: Scroll up one page
 - `Page Down`: Scroll down one page
+- `Home`: Jump to the top of the list 🔝
 - `w`: Write selected endpoints to output file and quit
 - `q`: Quit without saving
 - Mouse scroll: Navigate through endpoints
@@ -58,10 +60,20 @@ ApiSnip includes a powerful fuzzy search:
 - Press `/` to enter search mode
 - Type to filter endpoints by path and description
 - Results are ranked with path matches weighted higher than description matches
-- Best matches appear at the top
+- Selected items always appear at the top of results
+- Best matches appear first within their selection group
 - Selected items remain selected between searches
 - Search is case-insensitive
 - Press `Esc` to exit search and restore the full list
+
+## 📋 User Interface
+
+ApiSnip provides an intuitive interface for managing API endpoints:
+
+- **Smart sorting**: Selected endpoints automatically move to the top of the list for better visibility
+- **Context preservation**: When selecting items, the focus follows your natural workflow, avoiding disruptive jumps
+- **Detailed view**: View comprehensive endpoint details in the bottom panel
+- **Selection counter**: Track how many endpoints you've selected with the counter in the detail view
 
 ## 📋 Examples
 
