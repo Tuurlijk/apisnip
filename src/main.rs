@@ -66,9 +66,9 @@ impl Default for AppModel {
 #[derive(Parser)]
 #[clap(version, about = about_str())]
 pub struct Args {
-    /// The name of the input file
+    /// The name of the input file or URL
     #[clap()]
-    infile: String,
+    input: String,
 
     /// The name of the output file
     #[clap(default_value = "apisnip.out.yaml")]
@@ -103,10 +103,10 @@ fn main() -> color_eyre::Result<()> {
     let args = Args::parse();
     stdout().execute(EnableMouseCapture)?;
 
-    let spec = file::read_spec(&args.infile)?;
+    let spec = file::read_spec(&args.input)?;
 
     let mut model = AppModel {
-        infile: args.infile,
+        infile: args.input,
         outfile: args.outfile,
         spec,
         ..Default::default()

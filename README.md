@@ -16,6 +16,7 @@ A terminal user interface (TUI) tool for trimming OpenAPI specifications down to
 - 🖱️ Click-to-select in the table view
 - ⚡ Fast navigation with Page Up/Down
 - 🚀 Optimized for large API specifications
+- 🌐 Support for remote API specifications via URLs
 
 ## 🔧 Installation
 
@@ -26,12 +27,14 @@ cargo install apisnip
 ## 📖 Usage
 
 ```bash
-apisnip input.yaml [output.yaml]
+apisnip input [output.yaml]
 ```
 
 ### Arguments
 
-- `input.yaml`: The input OpenAPI specification file (required)
+- `input`: The input OpenAPI specification (required)
+  - Can be a local file path (JSON or YAML)
+  - Can be a URL to a remote specification (e.g., `https://example.com/api.yaml`)
 - `output.yaml`: The output file path (optional, defaults to "apisnip.out.yaml")
 
 ### 🎮 Controls
@@ -60,14 +63,17 @@ ApiSnip includes a powerful fuzzy search:
 - Search is case-insensitive
 - Press `Esc` to exit search and restore the full list
 
-## 📋 Example
+## 📋 Examples
 
 ```bash
-# Read from input.yaml and write to output.yaml
+# Read from local file and write to output.yaml
 apisnip input.yaml output.yaml
 
-# Read from input.json and write to apisnip.out.yaml
+# Read from local JSON file and write to apisnip.out.yaml
 apisnip input.json
+
+# Read from remote URL and write to custom output file
+apisnip https://petstore.swagger.io/v2/swagger.json my-petstore-api.yaml
 ```
 
 ## 🛠️ Development
