@@ -16,4 +16,4 @@ git push
 
 git checkout main
 
-xdg-open images/apisnip.gif
+xdg-open https://raw.githubusercontent.com/Tuurlijk/apisnip/refs/heads/images/images/apisnip.gif
