@@ -1,32 +1,39 @@
 use std::io::stdout;
 
+mod event;
 mod file;
-mod shortcuts;
 mod spec_processor;
 mod ui;
-mod event;
 
 use clap::Parser;
-use crossterm::ExecutableCommand;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use ratatui::Frame;
+use crossterm::ExecutableCommand;
+use event::{handle_event, Message};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::TableState;
+use ratatui::Frame;
 use serde_yaml::Mapping;
-
 use spec_processor::{Endpoint, Status};
-use ui::{render_detail, render_table};
-use event::{handle_event, Message};
+use tui_textarea::TextArea;
+use crate::ui::{render_detail, render_search, render_table};
 
 #[derive(Debug, Default)]
 struct AppModel {
-    table_items: Vec<Endpoint>,
-    table_state: TableState,
-    running_state: RunningState,
-    table_area: Option<ratatui::layout::Rect>,
     infile: String,
     outfile: String,
+    running_state: RunningState,
     spec: Mapping,
+    table_area: Option<ratatui::layout::Rect>,
+    table_items: Vec<Endpoint>,
+    table_state: TableState,
+    search_state: SearchState,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SearchState {
+    pub(crate) active: bool,
+    pub(crate) query: String,
+    pub(crate) text_input: TextArea<'static>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -92,13 +99,15 @@ fn main() -> color_eyre::Result<()> {
         model.table_state.select_first();
     }
 
+    model.search_state.text_input.insert_str("Cowabunga!");
+
     let mut terminal = tui::init_terminal()?;
     while model.running_state != RunningState::Done {
         // Render the current view
         terminal.draw(|f| view(&mut model, f))?;
 
         // Handle events and map to a Message
-        let mut current_msg = handle_event()?;
+        let mut current_msg = handle_event(&mut model)?;
 
         // Process updates as long as they return a non-None message
         while current_msg.is_some() {
@@ -111,10 +120,24 @@ fn main() -> color_eyre::Result<()> {
 }
 
 fn view(model: &mut AppModel, frame: &mut Frame) {
-    let [top, bottom] = Layout::vertical([Constraint::Percentage(80), Constraint::Min(10)])
-        .areas(frame.area());
-    render_table(model, top, frame);
-    render_detail(model, bottom, frame);
+    if model.search_state.active {
+        let [top, search, bottom] = Layout::vertical([
+            Constraint::Percentage(80),
+            Constraint::Length(2),
+            Constraint::Min(9),
+        ])
+            .areas(frame.area());
+        render_table(model, top, frame);
+        render_search(model, search, frame);
+        render_detail(model, bottom, frame);
+    } else {
+        let [top, bottom] = Layout::vertical([
+            Constraint::Percentage(80),
+            Constraint::Min(9),
+        ])            .areas(frame.area());
+        render_table(model, top, frame);
+        render_detail(model, bottom, frame);
+    }
 }
 
 fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
@@ -144,11 +167,20 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
         }
         Message::SelectRow(row) => {
             // Subtract 2 because first row is border and the second row is the header
-            let row_index = row as usize - 2;
-            let scroll_offset = model.table_state.offset();
-            let actual_index = row_index + scroll_offset;
-            if actual_index < model.table_items.len() {
-                model.table_state.select(Some(actual_index));
+            let row_offset = 2;
+            let last_index = model
+                .table_area
+                .map(|area| area.height.saturating_sub(1))
+                .unwrap_or(1);
+            // If the row is less than the offset, or greater than the last index, we don't need to process the message
+            if row < row_offset || row > last_index {
+                return None;
+            }
+            let row_index = row - row_offset;
+            let scroll_offset: usize = model.table_state.offset();
+            let actual_index = row_index + scroll_offset as u16;
+            if actual_index < model.table_items.len() as u16 {
+                model.table_state.select(Some(actual_index as usize));
             }
         }
         Message::ToggleSelectItemAndSelectNext => {
@@ -171,6 +203,15 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             let visible_rows = calculate_visible_table_rows(model);
             model.table_state.scroll_up_by(visible_rows);
         }
+        Message::ShowSearch => {
+            model.search_state.active = true;
+        }
+        Message::HideSearch => {
+            model.search_state.active = false;
+        }
+        Message::KeyPress(key) => {
+            model.search_state.text_input.input(key);
+        }
     };
     None
 }
@@ -189,12 +230,12 @@ mod tui {
     use std::io::stdout;
     use std::panic;
 
-    use ratatui::Terminal;
     use ratatui::backend::{Backend, CrosstermBackend};
-    use ratatui::crossterm::ExecutableCommand;
     use ratatui::crossterm::terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
     };
+    use ratatui::crossterm::ExecutableCommand;
+    use ratatui::Terminal;
 
     pub fn init_terminal() -> color_eyre::Result<Terminal<impl Backend>> {
         enable_raw_mode()?;

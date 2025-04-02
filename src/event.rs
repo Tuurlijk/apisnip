@@ -1,6 +1,7 @@
-use std::time::Duration;
-use crossterm::event::{self, Event, KeyCode, MouseEventKind};
+use crate::AppModel;
 use color_eyre::Result;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEventKind};
+use std::time::Duration;
 
 #[derive(PartialEq, Copy, Clone)]
 pub enum Message {
@@ -9,15 +10,18 @@ pub enum Message {
     SelectRow(u16),
     ToggleSelectItemAndSelectNext,
     SelectNextPage,
+    KeyPress(KeyEvent),
+    ShowSearch,
+    HideSearch,
     SelectPreviousPage,
     WriteAndQuit,
     Quit,
 }
 
-pub fn handle_event() -> Result<Option<Message>> {
+pub fn handle_event(model: &mut AppModel) -> Result<Option<Message>> {
     if event::poll(Duration::from_millis(250))? {
         match event::read()? {
-            Event::Key(key) if key.kind == event::KeyEventKind::Press => Ok(handle_key(key)),
+            Event::Key(key) if key.kind == event::KeyEventKind::Press => Ok(handle_key(key, model)),
             Event::Mouse(mouse) => Ok(handle_mouse(mouse)),
             _ => Ok(None),
         }
@@ -26,16 +30,27 @@ pub fn handle_event() -> Result<Option<Message>> {
     }
 }
 
-const fn handle_key(key: event::KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::SelectNext),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::SelectPrevious),
-        KeyCode::Char('q') => Some(Message::Quit),
-        KeyCode::Char('w') => Some(Message::WriteAndQuit),
-        KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
-        KeyCode::PageDown => Some(Message::SelectNextPage),
-        KeyCode::PageUp => Some(Message::SelectPreviousPage),
-        _ => None,
+const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Message> {
+    if model.search_state.active {
+        match key.code {
+            KeyCode::Esc => Some(Message::HideSearch),
+            _ => Some(Message::KeyPress(key)),
+        }
+    } else {
+        match key.code {
+            KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
+            KeyCode::Char('/') => Some(Message::ShowSearch),
+            KeyCode::Char('j') => Some(Message::SelectNext),
+            KeyCode::Char('k') => Some(Message::SelectPrevious),
+            KeyCode::Char('q') => Some(Message::Quit),
+            KeyCode::Char('w') => Some(Message::WriteAndQuit),
+            KeyCode::Up => Some(Message::SelectPrevious),
+            KeyCode::Down => Some(Message::SelectNext),
+            KeyCode::Esc => Some(Message::HideSearch),
+            KeyCode::PageDown => Some(Message::SelectNextPage),
+            KeyCode::PageUp => Some(Message::SelectPreviousPage),
+            _ => None,
+        }
     }
 }
 
@@ -46,4 +61,4 @@ const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
         MouseEventKind::Down(_) => Some(Message::SelectRow(mouse.row)),
         _ => None,
     }
-} 
+}

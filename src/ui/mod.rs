@@ -1,9 +1,14 @@
+pub mod widget;
+
+use crate::ui::widget::Shortcuts;
 use crate::spec_processor::{Method, Status};
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Padding, Paragraph, Row, Table,
+};
 use ratatui::{symbols, Frame};
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
@@ -57,8 +62,9 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
     .block(
         Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .border_type(BorderType::Rounded)
             .title(format!(
-                " {} endpoints for {}",
+                " {} endpoints for {} ",
                 model.table_items.len(),
                 model.infile
             ))
@@ -93,28 +99,34 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
         detail_lines.push(styled_method(method));
     }
 
-    let mut refs_lines: Vec<Line> = Vec::new();
+    let mut refs_lines: Vec<String> = Vec::new();
     for reference in selected_item.refs.iter() {
-        refs_lines.push(Line::from(format!("- {}", reference)));
+        refs_lines.push(reference.to_string());
     }
     if !refs_lines.is_empty() {
         detail_lines.push(Line::from("".to_string()));
-        detail_lines.push(Line::from("Component schemas:".to_string()));
-        detail_lines.extend(refs_lines);
+        detail_lines.push(Line::from(format!(
+            "Component schemas: {}",
+            refs_lines.join(", ")
+        )));
     }
 
     let collapsed_top_border_set = symbols::border::Set {
         top_left: symbols::line::NORMAL.vertical_right,
         top_right: symbols::line::NORMAL.vertical_left,
+        bottom_right: symbols::line::ROUNDED_BOTTOM_RIGHT,
+        bottom_left: symbols::line::ROUNDED_BOTTOM_LEFT,
         ..symbols::border::PLAIN
     };
 
-    let shortcuts = crate::shortcuts::Shortcuts::from(vec![
-        ("q", "quit"),
+    let shortcuts = Shortcuts::from(vec![
+        ("Esc", "exit search"),
         ("space", "✂️snip"),
         ("w", "write and quit"),
         ("↑", "move up"),
         ("↓", "move down"),
+        ("/", "search"),
+        ("Esc", "exit search"),
     ]);
 
     let selected_item_count = model
@@ -125,8 +137,8 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
 
     let detail = Paragraph::new(Text::from(detail_lines)).block(
         Block::default()
-            .border_set(collapsed_top_border_set)
             .borders(Borders::ALL)
+            .border_set(collapsed_top_border_set)
             .title(if selected_item_count > 0 {
                 Line::from(vec![
                     " ".into(),
@@ -143,6 +155,22 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     frame.render_widget(detail, area);
 }
 
+pub fn render_search(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
+    let collapsed_top_border_set = symbols::border::Set {
+        top_left: symbols::line::NORMAL.vertical_right,
+        top_right: symbols::line::NORMAL.vertical_left,
+        ..symbols::border::PLAIN
+    };
+
+    let block = Block::default()
+        .border_set(collapsed_top_border_set)
+        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+        .title(" 🔍 ");
+
+    model.search_state.text_input.set_block(block);
+    frame.render_widget(&model.search_state.text_input, area);
+}
+
 fn styled_method(method: &Method) -> Line {
     let method_str = method.method.to_uppercase();
     let padded_method = format!("{:<6}", method_str);
@@ -154,6 +182,7 @@ fn styled_method(method: &Method) -> Line {
         "POST" => Style::default().fg(Color::Green),
         "PUT" => Style::default().fg(Color::Magenta),
         "DELETE" => Style::default().fg(Color::Red),
+        "HEAD" => Style::default().fg(Color::Cyan),
         _ => Style::default().add_modifier(Modifier::ITALIC),
     };
 
