@@ -93,9 +93,13 @@ apisnip https://petstore.swagger.io/v2/swagger.json my-petstore-api.yaml
 ### Building from Source
 
 ```bash
-git clone https://github.com/michielroos/apisnip.git
+git clone https://github.com/Tuurlijk/apisnip.git
 cd apisnip
 cargo build --release
 ```
+
+## 📝 Todo
+
+- Enable user specified default styles or some sort of theming configuration
 
 [apisnip.gif]: https://github.com/Tuurlijk/apisnip/blob/images/images/apisnip.gif?raw=true

@@ -13,6 +13,7 @@ use event::{handle_event, Message};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Color, Style};
 use ratatui::widgets::TableState;
 use ratatui::Frame;
 use serde_yaml::Mapping;
@@ -47,6 +48,7 @@ struct AppModel {
     color_support: Option<ColorLevel>,
     color_mode: Mode,
     default_foreground_color: (u8, u8, u8),
+    default_style: Style,
 }
 
 impl Default for AppModel {
@@ -65,6 +67,7 @@ impl Default for AppModel {
             color_support: None,
             color_mode: Mode::Unspecified,
             default_foreground_color: (0, 0, 0),
+            default_style: Style::default(),
         }
     }
 }
@@ -131,6 +134,11 @@ fn main() -> color_eyre::Result<()> {
 
     model.color_support = supports_color::on(Stream::Stdout);
     set_color_preferences(&mut model);
+    model.default_style = Style::default().fg(Color::Indexed(rgb_to_indexed(
+        model.default_foreground_color.0,
+        model.default_foreground_color.1,
+        model.default_foreground_color.2,
+    )));
 
     model.table_items = spec_processor::fetch_endpoints_from_spec(&model.spec);
     // Don't preemptively create backup, only when search starts
@@ -469,7 +477,8 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
                 let query = model
                     .search_state
                     .text_input
-                    .lines().first()
+                    .lines()
+                    .first()
                     .map(|s| s.to_lowercase())
                     .unwrap_or_default();
 
@@ -502,18 +511,45 @@ fn calculate_visible_table_rows(model: &AppModel) -> u16 {
 fn set_color_preferences(model: &mut AppModel) {
     match terminal_light::luma() {
         Ok(luma) if luma > 0.85 => {
-            model.default_foreground_color = (68, 68, 68);
+            // Light mode: use a dark gray (#444444)
+            model.default_foreground_color = hex_to_rgb(0x444444);
             model.color_mode = Mode::Light;
         }
         Ok(luma) if luma < 0.2 => {
-            model.default_foreground_color = (192, 192, 192);
+            // Dark mode: use a light gray (#C0C0C0)
+            model.default_foreground_color = hex_to_rgb(0xC0C0C0);
             model.color_mode = Mode::Dark;
         }
         _ => {
-            model.default_foreground_color = (192, 192, 192);
+            // Default to dark mode
+            model.default_foreground_color = hex_to_rgb(0xC0C0C0);
             model.color_mode = Mode::Dark;
         }
     }
+}
+
+// Helper function to convert hex color to (r,g,b) tuple
+fn hex_to_rgb(hex: u32) -> (u8, u8, u8) {
+    let r = ((hex >> 16) & 0xFF) as u8;
+    let g = ((hex >> 8) & 0xFF) as u8;
+    let b = (hex & 0xFF) as u8;
+    (r, g, b)
+}
+
+// Convert RGB values to an indexed color (16-231)
+fn rgb_to_indexed(r: u8, g: u8, b: u8) -> u8 {
+    // Convert RGB to the 6x6x6 color cube (0-5 for each component)
+    let r_index = (r as f32 / 256.0 * 6.0) as u8;
+    let g_index = (g as f32 / 256.0 * 6.0) as u8;
+    let b_index = (b as f32 / 256.0 * 6.0) as u8;
+
+    // Ensure indices are in 0-5 range
+    let r_idx = r_index.min(5);
+    let g_idx = g_index.min(5);
+    let b_idx = b_index.min(5);
+
+    // Calculate the indexed color (16-231)
+    16 + 36 * r_idx + 6 * g_idx + b_idx
 }
 
 mod tui {
