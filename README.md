@@ -102,6 +102,7 @@ cargo build --release
 
 ## 📝 Todo
 
-- Enable user specified default styles or some sort of theming configuration
+- [ ] Enable user specified default styles or some sort of theming configuration
+- [x] Replace linear color gradient with smooth sine wave gradient for more natural visual transitions
 
 [apisnip.gif]: https://github.com/Tuurlijk/apisnip/blob/images/images/apisnip.gif?raw=true

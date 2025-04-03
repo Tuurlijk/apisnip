@@ -45,9 +45,12 @@ fn gradient_color(
     // Maximum distance for gradient effect
     let max_distance = 20;
 
-    let progress = distance as f32 / max_distance as f32;
+    // Calculate progress using a sine wave function instead of linear progression
+    // Map distance to a value between 0 and PI/2 (0 to 90 degrees)
+    let normalized_distance = (distance as f32).min(max_distance as f32) / max_distance as f32;
+    let progress = (normalized_distance * std::f32::consts::PI / 2.0).sin();
 
-    // Apply linear gradient based on terminal capabilities
+    // Apply sine wave gradient based on terminal capabilities
     let foreground = default_foreground;
 
     // Calculate dimmed foreground color based on color mode
