@@ -161,9 +161,9 @@ fn gradient_color(
                 Style::default().fg(Color::Rgb(index.0, index.1, index.2))
             } else {
                 Style::default().fg(Color::Rgb(
-                    foreground_color.0 as u8,
-                    foreground_color.1 as u8,
-                    foreground_color.2 as u8,
+                    foreground_color.0,
+                    foreground_color.1,
+                    foreground_color.2,
                 ))
             }
         }

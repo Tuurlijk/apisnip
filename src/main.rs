@@ -18,7 +18,6 @@ use ratatui::Frame;
 use serde_yaml::Mapping;
 use spec_processor::{Endpoint, Status};
 use supports_color::{ColorLevel, Stream};
-use terminal_light::luma;
 use tui_textarea::TextArea;
 
 #[derive(Default, Clone)]
@@ -470,8 +469,7 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
                 let query = model
                     .search_state
                     .text_input
-                    .lines()
-                    .get(0)
+                    .lines().first()
                     .map(|s| s.to_lowercase())
                     .unwrap_or_default();
 
