@@ -1,11 +1,11 @@
 [package]
 name = "apisnip"
 description = "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️"
-version = "1.3.2"
+version = "1.3.3"
 edition = "2021"
 authors = ["Michiel Roos <apisnip.zumble.frap@michielroos.com>"]
 license = "MIT"
-repository = "https://github.com/michielroos/apisnip"
+repository = "https://github.com/Tuurlijk/apisnip"
 keywords = ["openapi", "swagger", "api", "tui"]
 categories = ["command-line-utilities", "text-processing"]
 readme = "README.md"
