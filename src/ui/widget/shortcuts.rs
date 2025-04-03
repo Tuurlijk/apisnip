@@ -34,6 +34,20 @@ impl Shortcuts {
             padding_end: " ".to_string(),
         }
     }
+    
+    /// Create a new shortcuts widget directly (static constructor)
+    /// 
+    /// # Example
+    /// ```
+    /// let shortcuts = Shortcuts::new(vec![
+    ///     ("Esc", "exit"),
+    ///     ("↑", "move up"),
+    /// ]);
+    /// frame.render_widget(shortcuts, area);
+    /// ```
+    pub fn new(values: Vec<(&str, &str)>) -> Self {
+        Self::from(values)
+    }
 
     /// Get the line representation of all shortcuts
     pub fn as_line(&self) -> Line {

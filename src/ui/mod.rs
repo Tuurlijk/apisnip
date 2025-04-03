@@ -2,12 +2,174 @@ pub mod widget;
 
 use crate::spec_processor::{Method, Status};
 use crate::ui::widget::Shortcuts;
+use crate::Mode;
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Row, Table};
 use ratatui::{symbols, Frame};
+use supports_color::ColorLevel;
+
+// Helper to calculate a gradient color based on distance from selected row
+fn gradient_color(
+    distance: usize,
+    selected: bool,
+    is_selected_item: bool,
+    color_level: Option<ColorLevel>,
+    default_foreground: (u8, u8, u8),
+    color_mode: Mode,
+) -> Style {
+    // If this is the selected row, use reversed style
+    if selected {
+        return Style::default().add_modifier(Modifier::REVERSED | Modifier::ITALIC);
+    }
+
+    // If this is a selected item (✂️), use green/bold regardless of distance
+    if is_selected_item {
+        return Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD);
+    }
+
+    // For terminals with no color support, just return default style
+    if color_level.is_none() {
+        return Style::default();
+    }
+
+    // No effect for selected row and immediate neighbors
+    if distance <= 0 {
+        return Style::default();
+    }
+
+    // Maximum distance for gradient effect
+    let max_distance = 20;
+
+    let progress = distance as f32 / max_distance as f32;
+
+    // Apply linear gradient based on terminal capabilities
+    let foreground_color = default_foreground;
+
+    // The dimmed foreground color depends on the color mode and is about 75% of the default foreground color
+    // In case of the Dark mode, 'dimming' means making the text a bit darker
+    // In case of the Light mode, 'dimming' means making the text a bit lighter
+    // The values are clamped between 0 and 255
+    let dimmed_foreground_color = match color_mode {
+        Mode::Dark => (
+            (foreground_color.0 as f32 * 0.5).clamp(0.0, 255.0) as u8,
+            (foreground_color.1 as f32 * 0.5).clamp(0.0, 255.0) as u8,
+            (foreground_color.2 as f32 * 0.5).clamp(0.0, 255.0) as u8,
+        ),
+        Mode::Light => (
+            (foreground_color.0 as f32 * 2.0).clamp(0.0, 255.0) as u8,
+            (foreground_color.1 as f32 * 2.0).clamp(0.0, 255.0) as u8,
+            (foreground_color.2 as f32 * 2.0).clamp(0.0, 255.0) as u8,
+        ),
+        _ => (
+            (foreground_color.0 as f32 * 0.75).clamp(0.0, 255.0) as u8,
+            (foreground_color.1 as f32 * 0.75).clamp(0.0, 255.0) as u8,
+            (foreground_color.2 as f32 * 0.75).clamp(0.0, 255.0) as u8,
+        ),
+    };
+
+    match color_level {
+        Some(level) => {
+            if level.has_16m {
+                // For truecolor, use the dimmed foreground color and apply a linear gradient based on the distance from the selected row.
+                // In case of the Dark mode, 'dimming' means making the text a bit darker
+                // In case of the Light mode, 'dimming' means making the text a bit lighter
+                // The intensity is clamped between 0 and 255
+                // If the calculated intensity exceeds the dimmed foreground color, it is clamped to the dimmed foreground color
+                let intensity = (
+                    match color_mode {
+                        Mode::Dark => (foreground_color.0 as f32
+                            + ((dimmed_foreground_color.0 as f32 - foreground_color.0 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.0 as f32, foreground_color.0 as f32),
+                        _ => (foreground_color.0 as f32
+                            + ((dimmed_foreground_color.0 as f32 - foreground_color.0 as f32)
+                                * progress))
+                            .clamp(foreground_color.0 as f32, dimmed_foreground_color.0 as f32),
+                    },
+                    match color_mode {
+                        Mode::Dark => (foreground_color.1 as f32
+                            + ((dimmed_foreground_color.1 as f32 - foreground_color.1 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.1 as f32, foreground_color.1 as f32),
+                        _ => (foreground_color.1 as f32
+                            + ((dimmed_foreground_color.1 as f32 - foreground_color.1 as f32)
+                                * progress))
+                            .clamp(foreground_color.1 as f32, dimmed_foreground_color.1 as f32),
+                    },
+                    match color_mode {
+                        Mode::Dark => (foreground_color.2 as f32
+                            + ((dimmed_foreground_color.2 as f32 - foreground_color.2 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.2 as f32, foreground_color.2 as f32),
+                        _ => (foreground_color.2 as f32
+                            + ((dimmed_foreground_color.2 as f32 - foreground_color.2 as f32)
+                                * progress))
+                            .clamp(foreground_color.2 as f32, dimmed_foreground_color.2 as f32),
+                    },
+                );
+                Style::default().fg(Color::Rgb(
+                    intensity.0 as u8,
+                    intensity.1 as u8,
+                    intensity.2 as u8,
+                ))
+            } else if level.has_256 {
+                // For 256 colors, use indexed grayscale colors
+                // The intensity is clamped between foreground and dimmed foreground colors
+                let index = (
+                    match color_mode {
+                        Mode::Dark => (foreground_color.0 as f32
+                            + ((dimmed_foreground_color.0 as f32 - foreground_color.0 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.0 as f32, foreground_color.0 as f32)
+                            as u8,
+                        _ => (foreground_color.0 as f32
+                            + ((dimmed_foreground_color.0 as f32 - foreground_color.0 as f32)
+                                * progress))
+                            .clamp(foreground_color.0 as f32, dimmed_foreground_color.0 as f32)
+                            as u8,
+                    },
+                    match color_mode {
+                        Mode::Dark => (foreground_color.1 as f32
+                            + ((dimmed_foreground_color.1 as f32 - foreground_color.1 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.1 as f32, foreground_color.1 as f32)
+                            as u8,
+                        _ => (foreground_color.1 as f32
+                            + ((dimmed_foreground_color.1 as f32 - foreground_color.1 as f32)
+                                * progress))
+                            .clamp(foreground_color.1 as f32, dimmed_foreground_color.1 as f32)
+                            as u8,
+                    },
+                    match color_mode {
+                        Mode::Dark => (foreground_color.2 as f32
+                            + ((dimmed_foreground_color.2 as f32 - foreground_color.2 as f32)
+                                * progress))
+                            .clamp(dimmed_foreground_color.2 as f32, foreground_color.2 as f32)
+                            as u8,
+                        _ => (foreground_color.2 as f32
+                            + ((dimmed_foreground_color.2 as f32 - foreground_color.2 as f32)
+                                * progress))
+                            .clamp(foreground_color.2 as f32, dimmed_foreground_color.2 as f32)
+                            as u8,
+                    },
+                );
+                Style::default().fg(Color::Rgb(index.0, index.1, index.2))
+            } else {
+                Style::default().fg(Color::Rgb(
+                    foreground_color.0 as u8,
+                    foreground_color.1 as u8,
+                    foreground_color.2 as u8,
+                ))
+            }
+        }
+        None => Style::default(),
+    }
+}
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
     // Store the table area for pagination
@@ -33,7 +195,10 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
         .style(Style::default().add_modifier(Modifier::BOLD))
         .height(1);
 
-    let rows = model.table_items.iter().map(|data| {
+    // Get the currently selected index for calculating distance
+    let selected_idx = model.table_state.selected().unwrap_or(0);
+
+    let rows = model.table_items.iter().enumerate().map(|(idx, data)| {
         let mut description = data.description.clone();
         if description.is_empty() {
             description = data
@@ -49,13 +214,25 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
             Status::Selected => format!(" ✂️ {}", description),
         };
 
-        let row_style = if data.status == Status::Selected {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
+        // Calculate distance from selected row to apply gradient
+        let distance = if idx > selected_idx {
+            idx - selected_idx
         } else {
-            Style::default()
+            selected_idx - idx
         };
+
+        // Determine if this row should be selected (green)
+        let is_selected_item = data.status == Status::Selected;
+
+        // Apply gradient styling based on distance and color support
+        let row_style = gradient_color(
+            distance,
+            idx == selected_idx,
+            is_selected_item,
+            model.color_support,
+            model.default_foreground_color,
+            model.color_mode,
+        );
 
         Row::new(vec![
             description_selection,
@@ -70,18 +247,46 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
         .style(row_style)
     });
 
+    let mode = match model.color_mode {
+        Mode::Dark => "Dark",
+        Mode::Light => "Light",
+        Mode::Unspecified => "Unspecified",
+    };
+    let depth = match model.color_support {
+        Some(level) => {
+            if level.has_16m {
+                "24-bit"
+            } else if level.has_256 {
+                "16-bit"
+            } else {
+                "8-bit"
+            }
+        }
+        None => "No color support",
+    };
+
     let table = Table::new(
         rows,
         [Constraint::Min(20), Constraint::Min(20), Constraint::Min(1)],
     )
     .header(header)
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::ITALIC))
+    .row_highlight_style(
+        Style::default()
+            .add_modifier(Modifier::REVERSED | Modifier::ITALIC)
+            .fg(Color::Rgb(
+                model.default_foreground_color.0,
+                model.default_foreground_color.1,
+                model.default_foreground_color.2,
+            )),
+    )
     .block(
         Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .border_type(BorderType::Rounded)
             .title(format!(
-                " {} endpoints for {} ",
+                "[{} - {}] {} endpoints for {} ",
+                mode,
+                depth,
                 model.table_items.len(),
                 model.infile
             ))
@@ -153,7 +358,7 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
         ..symbols::border::PLAIN
     };
 
-    let shortcuts = Shortcuts::from(vec![
+    let shortcuts = Shortcuts::new(vec![
         ("q", "quit"),
         ("space", "✂️snip"),
         ("w", "write and quit"),
@@ -185,7 +390,6 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
                 Line::from("")
             })
             .title_bottom(shortcuts.as_line())
-            .title_alignment(Alignment::Right)
             .padding(Padding::new(1, 1, 0, 0)),
     );
     frame.render_widget(detail, area);

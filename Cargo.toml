@@ -31,6 +31,13 @@ url = "2.5.0"
 # Search
 fuzzy-matcher = "0.3.7"
 
+# Utils
+lazy_static = "1.4.0"
+termcolor = "1.4.0"
+atty = "0.2.14"
+supports-color = "2.1.0"
+terminal-light = "1.7.0"
+
 [build-dependencies]
 regex = "1.10.3"
 
