@@ -1,131 +1,15 @@
 pub mod widget;
+pub mod color;
 
 use crate::spec_processor::{Method, Status};
 use crate::ui::widget::Shortcuts;
-use crate::{rgb_to_indexed, Mode};
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Row, Table};
 use ratatui::{symbols, Frame};
-use supports_color::ColorLevel;
-
-// Helper to calculate a gradient color based on distance from selected row
-fn gradient_color(
-    distance: usize,
-    selected: bool,
-    is_selected_item: bool,
-    color_level: Option<ColorLevel>,
-    default_foreground: (u8, u8, u8),
-    color_mode: Mode,
-) -> Style {
-    // If this is the selected row, use reversed style
-    if selected {
-        return Style::default().add_modifier(Modifier::REVERSED | Modifier::ITALIC);
-    }
-
-    // If this is a selected item (✂️), use green/bold regardless of distance
-    if is_selected_item {
-        return Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD);
-    }
-
-    // For terminals with no color support, just return default style
-    if color_level.is_none() {
-        return Style::default();
-    }
-
-    // No effect for selected row and immediate neighbors
-    if distance <= 0 {
-        return Style::default();
-    }
-
-    // Maximum distance for gradient effect
-    let max_distance = 20;
-
-    // Calculate progress using a sine wave function instead of linear progression
-    // Map distance to a value between 0 and PI/2 (0 to 90 degrees)
-    let normalized_distance = (distance as f32).min(max_distance as f32) / max_distance as f32;
-    let progress = (normalized_distance * std::f32::consts::PI / 2.0).sin();
-
-    // Apply sine wave gradient based on terminal capabilities
-    let foreground = default_foreground;
-
-    // Calculate dimmed foreground color based on color mode
-    let dimmed = calculate_dimmed_color(foreground, color_mode);
-
-    // Calculate interpolated color with proper clamping based on color mode
-    let color = interpolate_color(foreground, dimmed, progress, color_mode);
-
-    // Create style with the calculated color
-    match color_level {
-        Some(level) if level.has_16m => {
-            // For truecolor terminals, use RGB directly
-            Style::default().fg(Color::Rgb(color.0, color.1, color.2))
-        }
-        Some(level) if level.has_256 => {
-            // For 256-color terminals, convert to indexed color
-            Style::default().fg(Color::Indexed(rgb_to_indexed(color.0, color.1, color.2)))
-        }
-        _ => {
-            // For basic terminals, use simple dimming
-            if progress > 0.5 {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default()
-            }
-        }
-    }
-}
-
-// Calculate dimmed foreground color based on color mode
-fn calculate_dimmed_color(foreground: (u8, u8, u8), color_mode: Mode) -> (u8, u8, u8) {
-    match color_mode {
-        Mode::Dark => (
-            (foreground.0 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-            (foreground.1 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-            (foreground.2 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-        ),
-        Mode::Light => (
-            (foreground.0 as f32 * 1.5).clamp(0.0, 255.0) as u8,
-            (foreground.1 as f32 * 1.5).clamp(0.0, 255.0) as u8,
-            (foreground.2 as f32 * 1.5).clamp(0.0, 255.0) as u8,
-        ),
-        _ => (
-            (foreground.0 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-            (foreground.1 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-            (foreground.2 as f32 * 0.75).clamp(0.0, 255.0) as u8,
-        ),
-    }
-}
-
-// Interpolate between foreground and dimmed colors based on progress
-fn interpolate_color(
-    foreground: (u8, u8, u8),
-    dimmed: (u8, u8, u8),
-    progress: f32,
-    color_mode: Mode,
-) -> (u8, u8, u8) {
-    let r = interpolate_component(foreground.0, dimmed.0, progress, color_mode);
-    let g = interpolate_component(foreground.1, dimmed.1, progress, color_mode);
-    let b = interpolate_component(foreground.2, dimmed.2, progress, color_mode);
-    (r, g, b)
-}
-
-// Interpolate a single color component with proper clamping based on color mode
-fn interpolate_component(fg: u8, dimmed: u8, progress: f32, color_mode: Mode) -> u8 {
-    let value = fg as f32 + ((dimmed as f32 - fg as f32) * progress);
-
-    // Clamp the value based on color mode
-    let clamped = match color_mode {
-        Mode::Dark => value.clamp(dimmed as f32, fg as f32),
-        _ => value.clamp(fg as f32, dimmed as f32),
-    };
-
-    clamped as u8
-}
+use crate::ui::color::gradient_color;
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
     // Store the table area for pagination

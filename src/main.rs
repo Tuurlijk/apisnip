@@ -6,6 +6,7 @@ mod spec_processor;
 mod ui;
 
 use crate::ui::{render_detail, render_search, render_table};
+use crate::ui::color::{rgb_to_indexed, set_color_preferences};
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::ExecutableCommand;
@@ -133,7 +134,7 @@ fn main() -> color_eyre::Result<()> {
     };
 
     model.color_support = supports_color::on(Stream::Stdout);
-    set_color_preferences(&mut model);
+    set_color_preferences(&mut model.color_mode, &mut model.default_foreground_color);
     model.default_style = Style::default().fg(Color::Indexed(rgb_to_indexed(
         model.default_foreground_color.0,
         model.default_foreground_color.1,
@@ -506,50 +507,6 @@ fn calculate_visible_table_rows(model: &AppModel) -> u16 {
         .map(|area| area.height.saturating_sub(3))
         .unwrap_or(1);
     visible_rows.min(total_rows)
-}
-
-fn set_color_preferences(model: &mut AppModel) {
-    match terminal_light::luma() {
-        Ok(luma) if luma > 0.85 => {
-            // Light mode: use a dark gray (#444444)
-            model.default_foreground_color = hex_to_rgb(0x444444);
-            model.color_mode = Mode::Light;
-        }
-        Ok(luma) if luma < 0.2 => {
-            // Dark mode: use a light gray (#C0C0C0)
-            model.default_foreground_color = hex_to_rgb(0xC0C0C0);
-            model.color_mode = Mode::Dark;
-        }
-        _ => {
-            // Default to dark mode
-            model.default_foreground_color = hex_to_rgb(0xC0C0C0);
-            model.color_mode = Mode::Dark;
-        }
-    }
-}
-
-// Helper function to convert hex color to (r,g,b) tuple
-fn hex_to_rgb(hex: u32) -> (u8, u8, u8) {
-    let r = ((hex >> 16) & 0xFF) as u8;
-    let g = ((hex >> 8) & 0xFF) as u8;
-    let b = (hex & 0xFF) as u8;
-    (r, g, b)
-}
-
-// Convert RGB values to an indexed color (16-231)
-fn rgb_to_indexed(r: u8, g: u8, b: u8) -> u8 {
-    // Convert RGB to the 6x6x6 color cube (0-5 for each component)
-    let r_index = (r as f32 / 256.0 * 6.0) as u8;
-    let g_index = (g as f32 / 256.0 * 6.0) as u8;
-    let b_index = (b as f32 / 256.0 * 6.0) as u8;
-
-    // Ensure indices are in 0-5 range
-    let r_idx = r_index.min(5);
-    let g_idx = g_index.min(5);
-    let b_idx = b_index.min(5);
-
-    // Calculate the indexed color (16-231)
-    16 + 36 * r_idx + 6 * g_idx + b_idx
 }
 
 mod tui {
