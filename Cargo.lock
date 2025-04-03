@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "apisnip"
-version = "1.4.1"
+version = "1.4.2"
 dependencies = [
  "atty",
  "clap",

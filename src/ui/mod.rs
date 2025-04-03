@@ -337,6 +337,7 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
             } else {
                 Line::from("")
             })
+            .title_alignment(Alignment::Right)
             .title_bottom(shortcuts.as_line())
             .padding(Padding::new(1, 1, 0, 0))
             .style(model.default_style),
