@@ -18,6 +18,7 @@ A terminal user interface (TUI) tool for trimming OpenAPI specifications down to
 - 🚀 Optimized for large API specifications
 - 🌐 Support for remote API specifications via URLs
 - 📊 Selected endpoints automatically grouped at the top
+- 🌓 Automatic detection of system theme (light/dark mode)
 
 ## 🔧 Installation
 
@@ -74,6 +75,7 @@ ApiSnip provides an intuitive interface for managing API endpoints:
 - **Context preservation**: When selecting items, the focus follows your natural workflow, avoiding disruptive jumps
 - **Detailed view**: View comprehensive endpoint details in the bottom panel
 - **Selection counter**: Track how many endpoints you've selected with the counter in the detail view
+- **Adaptive theming**: Automatically detects your system's light/dark mode preference and adjusts colors to ensure optimal readability in any environment
 
 ## 📋 Examples
 
