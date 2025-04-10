@@ -81,9 +81,9 @@ pub fn calculate_dimmed_color(foreground: (u8, u8, u8), color_mode: Mode) -> (u8
             (foreground.2 as f32 * 0.75).clamp(0.0, 255.0) as u8,
         ),
         Mode::Light => (
-            (foreground.0 as f32 * 1.5).clamp(0.0, 255.0) as u8,
-            (foreground.1 as f32 * 1.5).clamp(0.0, 255.0) as u8,
-            (foreground.2 as f32 * 1.5).clamp(0.0, 255.0) as u8,
+            (foreground.0 as f32 * 2.0).clamp(0.0, 255.0) as u8,
+            (foreground.1 as f32 * 2.0).clamp(0.0, 255.0) as u8,
+            (foreground.2 as f32 * 2.0).clamp(0.0, 255.0) as u8,
         ),
         _ => (
             (foreground.0 as f32 * 0.75).clamp(0.0, 255.0) as u8,
@@ -147,8 +147,8 @@ pub fn rgb_to_indexed(r: u8, g: u8, b: u8) -> u8 {
 pub fn set_color_preferences(color_mode: &mut Mode, default_foreground_color: &mut (u8, u8, u8)) {
     match terminal_light::luma() {
         Ok(luma) if luma > 0.85 => {
-            // Light mode: use a dark gray (#444444)
-            *default_foreground_color = hex_to_rgb(0x444444);
+            // Light mode: use a dark gray (#333333)
+            *default_foreground_color = hex_to_rgb(0x333333);
             *color_mode = Mode::Light;
         }
         Ok(luma) if luma < 0.2 => {

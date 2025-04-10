@@ -48,7 +48,7 @@ apisnip input [output.yaml]
 - `Esc`: Exit search mode
 - `Page Up`: Scroll up one page
 - `Page Down`: Scroll down one page
-- `Home`: Jump to the top of the list 🔝
+- `Home / End`: Jump to the top or bottom of the list 🔝
 - `w`: Write selected endpoints to output file and quit
 - `q`: Quit without saving
 - Mouse scroll: Navigate through endpoints

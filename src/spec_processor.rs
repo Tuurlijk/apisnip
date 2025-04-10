@@ -44,7 +44,6 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
             .unwrap();
         let mut refs: Vec<String> = Vec::new();
         for (ops_method, op) in ops_map {
-            let mut method = Method::default();
             let method_str = ops_method
                 .as_str()
                 .ok_or_eyre("Method key is not a string")
@@ -60,23 +59,22 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
                 table_item.description = op.as_str().unwrap_or("").to_string();
                 continue;
             }
+            let mut method = Method::default();
             let summary = op
                 .as_mapping()
                 .and_then(|m| m.get(Value::String("summary".to_string())))
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+                .unwrap_or("");
             let description = op
                 .as_mapping()
                 .and_then(|m| m.get(Value::String("description".to_string())))
                 .and_then(|v| v.as_str())
-                .unwrap_or("No description")
-                .to_string();
+                .unwrap_or("No description");
             method.method = method_str.to_string();
             method.description = if !summary.is_empty() {
-                summary
+                summary.to_string()
             } else {
-                description
+                description.to_string()
             };
             refs.extend(fetch_all_references(op));
             table_item.methods.push(method);
@@ -90,7 +88,7 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
     }
 
     // Order table items by path
-    table_items.sort_by_key(|item| item.path.clone());
+    table_items.sort_by(|a, b| a.path.cmp(&b.path));
     table_items
 }
 
@@ -142,11 +140,12 @@ pub fn process_spec_for_output(spec: &Mapping, selected_items: &[&Endpoint]) -> 
     }
 
     // Collect all references from selected items
-    let collected_references = selected_items
+    let collected_references: Vec<String> = selected_items
         .iter()
-        .flat_map(|item| item.refs.clone())
+        .flat_map(|item| &item.refs)
+        .cloned()
         .unique()
-        .collect::<Vec<String>>();
+        .collect();
 
     // Collect all references to preserve
     let mut all_references_to_preserve = Vec::new();

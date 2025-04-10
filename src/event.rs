@@ -5,18 +5,20 @@ use std::time::Duration;
 
 #[derive(PartialEq, Copy, Clone)]
 pub enum Message {
-    SelectNext,
-    SelectPrevious,
-    SelectRow(u16),
-    ToggleSelectItemAndSelectNext,
-    SelectNextPage,
-    KeyPress(KeyEvent),
-    ShowSearch,
-    HideSearch,
-    SelectPreviousPage,
-    WriteAndQuit,
-    Quit,
+    ClearSearch,
+    GoToBottom,
     GoToTop,
+    HideSearch,
+    KeyPress(KeyEvent),
+    Quit,
+    SelectNext,
+    SelectNextPage,
+    SelectPrevious,
+    SelectPreviousPage,
+    SelectRow(u16),
+    ShowSearch,
+    ToggleSelectItemAndSelectNext,
+    WriteAndQuit,
 }
 
 pub fn handle_event(model: &mut AppModel) -> Result<Option<Message>> {
@@ -34,6 +36,9 @@ pub fn handle_event(model: &mut AppModel) -> Result<Option<Message>> {
 const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Message> {
     if model.search_state.active {
         match key.code {
+            KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                Some(Message::ClearSearch)
+            }
             KeyCode::Esc => Some(Message::HideSearch),
             KeyCode::Char(' ') => Some(Message::ToggleSelectItemAndSelectNext),
             KeyCode::Up => Some(Message::SelectPrevious),
@@ -58,6 +63,7 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
             KeyCode::PageDown => Some(Message::SelectNextPage),
             KeyCode::PageUp => Some(Message::SelectPreviousPage),
             KeyCode::Home => Some(Message::GoToTop),
+            KeyCode::End => Some(Message::GoToBottom),
             _ => None,
         }
     }

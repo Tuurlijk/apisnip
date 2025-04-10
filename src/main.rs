@@ -5,8 +5,8 @@ mod file;
 mod spec_processor;
 mod ui;
 
-use crate::ui::{render_detail, render_search, render_table};
 use crate::ui::color::{rgb_to_indexed, set_color_preferences};
+use crate::ui::{render_detail, render_search, render_table};
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::ExecutableCommand;
@@ -121,7 +121,7 @@ fn about_str() -> &'static str {
 
 fn main() -> color_eyre::Result<()> {
     tui::install_panic_hook();
-    let args = Args::parse();
+    let args: Args = Args::parse();
     stdout().execute(EnableMouseCapture)?;
 
     let spec = file::read_spec(&args.input)?;
@@ -148,8 +148,6 @@ fn main() -> color_eyre::Result<()> {
     if model.table_state.selected().is_none() {
         model.table_state.select_first();
     }
-
-    model.search_state.text_input.insert_str("Cowabunga!");
 
     let mut terminal = tui::init_terminal()?;
     while model.running_state != RunningState::Done {
@@ -313,6 +311,18 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
 
         Message::Quit => {
             model.running_state = RunningState::Done;
+            None
+        }
+
+        Message::GoToBottom => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            model.table_state.select(Some(model.table_items.len() - 1));
+            let current_offset = model.table_state.offset();
+            if current_offset > 0 {
+                model.table_state.scroll_down_by(current_offset as u16);
+            }
             None
         }
 
@@ -485,6 +495,12 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
 
                 model.filter_items(&query);
             }
+            None
+        }
+
+        Message::ClearSearch => {
+            model.search_state.text_input = TextArea::default();
+            model.filter_items("");
             None
         }
     }

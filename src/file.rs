@@ -7,7 +7,8 @@ use url::Url;
 use crate::spec_processor::{Endpoint, Status};
 
 pub fn read_spec(path: &str) -> Result<Mapping> {
-    let input_content = if path.starts_with("http://") || path.starts_with("https://") {
+    let is_url = path.starts_with("http://") || path.starts_with("https://");
+    let input_content = if is_url {
         // Handle URL
         let url = Url::parse(path)?;
         let response = reqwest::blocking::get(url)?;
@@ -18,19 +19,10 @@ pub fn read_spec(path: &str) -> Result<Mapping> {
     };
 
     // Detect file extension or content type and parse accordingly
-    let extension = if path.starts_with("http://") || path.starts_with("https://") {
-        // Try to get extension from URL
-        Path::new(path)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_lowercase())
-    } else {
-        // Get extension from local file
-        Path::new(path)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_lowercase())
-    };
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_lowercase());
 
     match extension.as_deref() {
         Some("json") => {

@@ -1,15 +1,28 @@
-pub mod widget;
 pub mod color;
+pub mod widget;
 
 use crate::spec_processor::{Method, Status};
+use crate::ui::color::gradient_color;
 use crate::ui::widget::Shortcuts;
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::prelude::Stylize;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Padding, Paragraph, Row, Scrollbar, ScrollbarState, Table,
+};
 use ratatui::{symbols, Frame};
-use crate::ui::color::gradient_color;
+
+// Helper function to calculate visible rows in the table
+fn calculate_visible_table_rows(model: &crate::AppModel) -> usize {
+    // Each row is 1 line high, header is 1 line, borders are 2 lines
+    let total_rows = model.table_items.len();
+    let visible_rows = model
+        .table_area
+        .map(|area| area.height.saturating_sub(3) as usize)
+        .unwrap_or(1);
+    visible_rows.min(total_rows)
+}
 
 pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) {
     // Store the table area for pagination
@@ -39,15 +52,16 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
     let selected_idx = model.table_state.selected().unwrap_or(0);
 
     let rows = model.table_items.iter().enumerate().map(|(idx, data)| {
-        let mut description = data.description.clone();
-        if description.is_empty() {
-            description = data
-                .methods
+        // Use a reference to the description to avoid cloning
+        let description = if data.description.is_empty() {
+            data.methods
                 .iter()
                 .map(|method| method.description.as_str())
                 .collect::<Vec<&str>>()
-                .join("/");
-        }
+                .join("/")
+        } else {
+            data.description.to_string()
+        };
 
         let description_selection = match data.status {
             Status::Unselected => format!("    {}", description),
@@ -74,36 +88,19 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
             model.color_mode,
         );
 
+        // Use references for path and methods to avoid cloning
         Row::new(vec![
             description_selection,
-            data.path.clone(),
+            data.path.to_string(),
             data.methods
                 .iter()
-                .map(|method| method.method.as_str().to_uppercase())
+                .map(|method| method.method.to_uppercase())
                 .collect::<Vec<String>>()
                 .join(" "),
         ])
         .height(1)
         .style(row_style)
     });
-
-    // let mode = match model.color_mode {
-    //     Mode::Dark => "Dark",
-    //     Mode::Light => "Light",
-    //     Mode::Unspecified => "Unspecified",
-    // };
-    // let depth = match model.color_support {
-    //     Some(level) => {
-    //         if level.has_16m {
-    //             "24-bit"
-    //         } else if level.has_256 {
-    //             "16-bit"
-    //         } else {
-    //             "8-bit"
-    //         }
-    //     }
-    //     None => "No color support",
-    // };
 
     let table = Table::new(
         rows,
@@ -124,7 +121,32 @@ pub fn render_table(model: &mut crate::AppModel, area: Rect, frame: &mut Frame) 
             .style(model.default_style),
     );
 
+    // Calculate scrollbar state
+    let visible_rows = calculate_visible_table_rows(model);
+    let total_rows = model.table_items.len();
+    let mut scrollbar_state = ScrollbarState::new(total_rows)
+        .position(selected_idx)
+        .viewport_content_length(visible_rows);
+
+    // Render the table
     frame.render_stateful_widget(table, area, &mut model.table_state);
+
+    // Render the scrollbar
+    let scrollbar = Scrollbar::default()
+        .orientation(ratatui::widgets::ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(None)
+        .thumb_symbol("█");
+
+    frame.render_stateful_widget(
+        scrollbar,
+        area.inner(ratatui::layout::Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        &mut scrollbar_state,
+    );
 }
 
 pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
@@ -162,11 +184,9 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     let mut detail_lines: Vec<Line> = Vec::new();
     detail_lines.push(Line::from(description));
     detail_lines.push(Line::from("".to_string()));
-    detail_lines.push(
-        Line::from(selected_item.path.clone()).style(Style::default().add_modifier(Modifier::BOLD)),
-    );
+    detail_lines.push(Line::from(selected_item.path.clone()).style(Style::default()));
     for method in selected_item.methods.iter() {
-        detail_lines.push(styled_method(method));
+        detail_lines.push(styled_method_with_description(method, 6));
     }
 
     let mut refs_lines: Vec<String> = Vec::new();
@@ -193,11 +213,9 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
         ("q", "quit"),
         ("space", "✂️snip"),
         ("w", "write and quit"),
-        ("↑", "move up"),
-        ("↓", "move down"),
+        ("↑ ↓", "move"),
         ("/", "search"),
         ("Esc", "exit search"),
-        ("Home", "to top"),
     ])
     .with_alignment(Alignment::Right)
     .with_label_style(model.default_style.add_modifier(Modifier::BOLD));
@@ -237,6 +255,12 @@ pub fn render_search(model: &mut crate::AppModel, area: Rect, frame: &mut Frame)
     };
 
     let block = Block::default()
+        .padding(Padding {
+            left: 1,
+            right: 0,
+            top: 0,
+            bottom: 0,
+        })
         .border_set(collapsed_top_border_set)
         .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
         .title(" 🔍 ")
@@ -246,10 +270,23 @@ pub fn render_search(model: &mut crate::AppModel, area: Rect, frame: &mut Frame)
     frame.render_widget(&model.search_state.text_input, area);
 }
 
-fn styled_method(method: &Method) -> Line {
-    let method_str = method.method.to_uppercase();
-    let padded_method = format!("{:<6}", method_str);
-    let the_method = Span::from(padded_method);
+fn styled_method_with_description(method: &Method, padding: usize) -> Line {
+    Line::from(vec![
+        colored_method(&method.method, padding).add_modifier(Modifier::BOLD),
+        Span::from(" "),
+        Span::from(method.description.clone()),
+    ])
+}
+
+fn colored_method(method: &String, padding: usize) -> Span {
+    let method_str = method.to_uppercase();
+    let the_method: Span;
+    if padding > 0 {
+        let padded_method = format!("{:<padding$}", method_str.clone());
+        the_method = Span::from(padded_method);
+    } else {
+        the_method = Span::from(method_str.clone());
+    }
 
     let method_style = match method_str.as_str() {
         "GET" => Style::default().fg(Color::Blue),
@@ -261,9 +298,5 @@ fn styled_method(method: &Method) -> Line {
         _ => Style::default().add_modifier(Modifier::ITALIC),
     };
 
-    Line::from(vec![
-        the_method.style(method_style.add_modifier(Modifier::BOLD)),
-        Span::from(" "),
-        Span::from(method.description.clone()),
-    ])
+    the_method.style(method_style)
 }
