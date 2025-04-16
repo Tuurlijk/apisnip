@@ -109,12 +109,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build macOS binaries with GoReleaser (using .goreleaser.yml)
+      - name: Build macOS binaries with GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
-          args: build --snapshot --clean --id=macos -f .goreleaser.yml
+          version: v2.8.2
+          args: build --snapshot --clean --id=macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -160,11 +160,11 @@ jobs:
       - name: List merged dist directory # For debugging
         run: ls -R dist
 
-      - name: Run GoReleaser to package and publish (using .goreleaser-release.yml)
+      - name: Run GoReleaser to package and publish
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
-          args: release --clean -f .goreleaser-release.yml
+          version: v2.8.2
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
