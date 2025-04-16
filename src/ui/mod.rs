@@ -278,15 +278,13 @@ fn styled_method_with_description(method: &Method, padding: usize) -> Line {
     ])
 }
 
-fn colored_method(method: &String, padding: usize) -> Span {
+fn colored_method(method: &str, padding: usize) -> Span {
     let method_str = method.to_uppercase();
-    let the_method: Span;
-    if padding > 0 {
-        let padded_method = format!("{:<padding$}", method_str.clone());
-        the_method = Span::from(padded_method);
+    let the_method: Span = if padding > 0 {
+        Span::from(format!("{:<padding$}", method_str.clone()))
     } else {
-        the_method = Span::from(method_str.clone());
-    }
+        Span::from(method_str.clone())
+    };
 
     let method_style = match method_str.as_str() {
         "GET" => Style::default().fg(Color::Blue),

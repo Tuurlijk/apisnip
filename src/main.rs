@@ -507,7 +507,7 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
 }
 
 // Helper function to sort items with selected ones at the top
-fn sort_items_selected_first(items: &mut Vec<Endpoint>) {
+fn sort_items_selected_first(items: &mut [Endpoint]) {
     items.sort_by(|a, b| match (a.status, b.status) {
         (Status::Selected, Status::Unselected) => std::cmp::Ordering::Less,
         (Status::Unselected, Status::Selected) => std::cmp::Ordering::Greater,

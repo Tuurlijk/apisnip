@@ -30,7 +30,7 @@ pub fn gradient_color(
     }
 
     // No effect for selected row and immediate neighbors
-    if distance <= 0 {
+    if distance == 0 {
         return Style::default();
     }
 
