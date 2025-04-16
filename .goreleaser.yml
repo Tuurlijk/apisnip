@@ -63,6 +63,14 @@ nfpms:
     formats:
       - deb
       - rpm
+      - apk
+      - archlinux
+      - pacman
+      - termux
+      - flatpak
+      - snap
+      - nix
+      - ebuild
     contents:
       - src: resources/icons/linux/apisnip.svg
         dst: /usr/share/icons/hicolor/scalable/apps/apisnip.svg
