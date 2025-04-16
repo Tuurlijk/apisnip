@@ -78,7 +78,6 @@ nfpms:
       - rpm
       - apk
       - archlinux
-      - pacman
       - termux
       - flatpak
       - snap
