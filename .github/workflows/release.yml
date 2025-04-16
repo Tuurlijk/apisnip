@@ -10,8 +10,6 @@ jobs:
   # Single job using goreleaser-cross Docker image
   goreleaser:
     runs-on: ubuntu-22.04
-    container:
-      image: ghcr.io/goreleaser/goreleaser-cross:v1.24
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -29,10 +27,12 @@ jobs:
 
       # Install UPX for binary compression
       - name: Install UPX
-        run: apt-get update && apt-get install -y upx
+        run: sudo apt-get update && sudo apt-get install -y upx
 
-      # Run GoReleaser to build and publish
+      # Run GoReleaser to build and publish in a container
       - name: Run GoReleaser
-        run: goreleaser release --clean
+        uses: docker://ghcr.io/goreleaser/goreleaser-cross:v1.24
+        with:
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
