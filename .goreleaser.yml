@@ -22,9 +22,9 @@ builds:
       # macOS targets
       - x86_64-apple-darwin
       - aarch64-apple-darwin
-      # Windows targets
-      - x86_64-pc-windows-msvc
-      - i686-pc-windows-msvc
+      # Windows targets using GNU toolchain for cross-compilation
+      - x86_64-pc-windows-gnu
+      - i686-pc-windows-gnu
     flags:
       - --release
     hooks:
