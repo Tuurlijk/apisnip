@@ -18,73 +18,73 @@ jobs:
           - name: Linux x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary_path: target/x86_64-unknown-linux-gnu/release/mot
-            asset_name: mot-linux-x86_64
+            binary_path: target/x86_64-unknown-linux-gnu/release/apisnip
+            asset_name: apisnip-linux-x86_64
           
           - name: Linux ARM64
             os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            binary_path: target/aarch64-unknown-linux-gnu/release/mot
-            asset_name: mot-linux-arm64
+            binary_path: target/aarch64-unknown-linux-gnu/release/apisnip
+            asset_name: apisnip-linux-arm64
             use_cross: true
           
           - name: Linux ARM32 (armv7)
             os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            binary_path: target/armv7-unknown-linux-gnueabihf/release/mot
-            asset_name: mot-linux-armv7
+            binary_path: target/armv7-unknown-linux-gnueabihf/release/apisnip
+            asset_name: apisnip-linux-armv7
             use_cross: true
           
           - name: Linux ARM32 (Raspberry Pi)
             os: ubuntu-latest
             target: arm-unknown-linux-gnueabihf
-            binary_path: target/arm-unknown-linux-gnueabihf/release/mot
-            asset_name: mot-linux-arm
+            binary_path: target/arm-unknown-linux-gnueabihf/release/apisnip
+            asset_name: apisnip-linux-arm
             use_cross: true
           
           - name: Linux x86 (32-bit)
             os: ubuntu-latest
             target: i686-unknown-linux-gnu
-            binary_path: target/i686-unknown-linux-gnu/release/mot
-            asset_name: mot-linux-i686
+            binary_path: target/i686-unknown-linux-gnu/release/apisnip
+            asset_name: apisnip-linux-i686
             use_cross: true
           
           - name: Linux RISC-V 64-bit
             os: ubuntu-latest
             target: riscv64gc-unknown-linux-gnu
-            binary_path: target/riscv64gc-unknown-linux-gnu/release/mot
-            asset_name: mot-linux-riscv64
+            binary_path: target/riscv64gc-unknown-linux-gnu/release/apisnip
+            asset_name: apisnip-linux-riscv64
             use_cross: true
           
           - name: Linux MUSL x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            binary_path: target/x86_64-unknown-linux-musl/release/mot
-            asset_name: mot-linux-musl-x86_64
+            binary_path: target/x86_64-unknown-linux-musl/release/apisnip
+            asset_name: apisnip-linux-musl-x86_64
           
           - name: Windows x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_path: target/x86_64-pc-windows-msvc/release/mot.exe
-            asset_name: mot-windows-x86_64
+            binary_path: target/x86_64-pc-windows-msvc/release/apisnip.exe
+            asset_name: apisnip-windows-x86_64
           
           - name: Windows x86 (32-bit)
             os: windows-latest
             target: i686-pc-windows-msvc
-            binary_path: target/i686-pc-windows-msvc/release/mot.exe
-            asset_name: mot-windows-i686
+            binary_path: target/i686-pc-windows-msvc/release/apisnip.exe
+            asset_name: apisnip-windows-i686
           
           - name: macOS x86_64
             os: macos-latest
             target: x86_64-apple-darwin
-            binary_path: target/x86_64-apple-darwin/release/mot
-            asset_name: mot-macos-x86_64
+            binary_path: target/x86_64-apple-darwin/release/apisnip
+            asset_name: apisnip-macos-x86_64
           
           - name: macOS ARM64
             os: macos-latest
             target: aarch64-apple-darwin
-            binary_path: target/aarch64-apple-darwin/release/mot
-            asset_name: mot-macos-arm64
+            binary_path: target/aarch64-apple-darwin/release/apisnip
+            asset_name: apisnip-macos-arm64
 
     steps:
       - name: Checkout repository
@@ -204,7 +204,7 @@ jobs:
         run: |
           VERSION=${{ github.ref_name }}
           VERSION="${VERSION#v}"
-          EXISTS=$(cargo search mot --limit 1 | grep -c "mot = \"$VERSION\"" || true)
+          EXISTS=$(cargo search apisnip --limit 1 | grep -c "apisnip = \"$VERSION\"" || true)
           echo "exists=$EXISTS" >> $GITHUB_OUTPUT
       
       - name: Publish crate
@@ -225,7 +225,7 @@ jobs:
   #       id: meta
   #       uses: docker/metadata-action@v5
   #       with:
-  #         images: tuurlijk/mot
+  #         images: tuurlijk/apisnip
   #         tags: |
   #           type=semver,pattern={{version}}
   #           type=semver,pattern={{major}}.{{minor}}
