@@ -33,6 +33,7 @@ jobs:
       - name: Run GoReleaser
         uses: docker://ghcr.io/goreleaser/goreleaser-cross:v1.24
         with:
-          args: release --clean
+          entrypoint: /bin/sh
+          args: -c "apt-get update && apt-get install -y curl && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source $HOME/.cargo/env && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-pc-windows-gnu i686-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin && goreleaser release --clean"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
