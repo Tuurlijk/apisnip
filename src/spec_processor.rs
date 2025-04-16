@@ -120,7 +120,7 @@ fn fetch_all_references(value: &Value) -> Vec<String> {
 fn strip_path_from_references(references: &[String]) -> Vec<String> {
     references
         .iter()
-        .map(|ref_str| ref_str.split('/').last().unwrap().to_string())
+        .map(|ref_str| ref_str.split('/').next_back().unwrap().to_string())
         .collect::<Vec<String>>()
 }
 
