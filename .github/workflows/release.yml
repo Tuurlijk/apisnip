@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     name: Build for ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -24,6 +24,7 @@ jobs:
             artifact-name: windows-x86_64
             os: ubuntu-latest
             binary-suffix: .exe
+            docker-image: ghcr.io/cross-rs/x86_64-pc-windows-msvc:latest
           - target: x86_64-apple-darwin
             artifact-name: macos-x86_64
             os: macos-latest
@@ -61,10 +62,10 @@ jobs:
             ${{ runner.os }}-cargo-
 
       # Build the binary
-      - name: Build
+      - name: Build with cross
         run: |
           if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-            cross build --release --target ${{ matrix.target }}
+            docker run --rm -v $(pwd):/usr/src -w /usr/src ${{ matrix.docker-image }} cross build --release --target ${{ matrix.target }}
           else
             cargo build --release --target ${{ matrix.target }}
           fi
