@@ -8,12 +8,10 @@ before:
 
 # This is using GoReleaser's Rust support
 builds:
-  - id: apisnip
+  - id: linux-win
     binary: apisnip
     builder: rust
-    # Specify the build strategy - use plain cargo instead of zigbuild
     command: build
-    # For Rust we use targets instead of goos/goarch
     targets:
       # Linux targets
       - x86_64-unknown-linux-gnu
@@ -22,21 +20,28 @@ builds:
       # Windows targets using GNU toolchain for cross-compilation
       - x86_64-pc-windows-gnu
       - i686-pc-windows-gnu
+    flags:
+      - --release
+    hooks:
+      pre: []
+      post:
+        - upx "{{ .Path }}" || true
+
+  - id: macos
+    binary: apisnip
+    builder: rust
+    command: build
+    targets:
       # macOS targets
       - x86_64-apple-darwin
       - aarch64-apple-darwin
     flags:
       - --release
-    # env:
-    #   # Required environment variables for macOS cross-compilation
-    #   - MACOSX_DEPLOYMENT_TARGET=10.7
-    #   - CC=o64-clang
-    #   - CXX=o64-clang++
     hooks:
       pre:
         - rustup target add {{ .Target }}
       post:
-        - upx "{{ .Path }}" || true  # Add back the UPX compression but don't fail if it doesn't work
+        - upx "{{ .Path }}" || true
 
 archives:
   - format_overrides:

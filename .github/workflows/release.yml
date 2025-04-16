@@ -9,7 +9,7 @@ permissions:
 jobs:
   # Build for Linux (x86_64, aarch64, i686) and Windows (x86_64, i686)
   build-linux-win:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -51,7 +51,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --snapshot --clean --skip=validate --id=apisnip
+          args: build --snapshot --clean --skip=validate --id=linux-win
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,7 +90,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: build --snapshot --clean --skip=validate --id=apisnip
+          args: build --snapshot --clean --skip=validate --id=macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
