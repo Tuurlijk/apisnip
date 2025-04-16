@@ -36,11 +36,10 @@ builds:
       pre:
         - rustup target add {{ .Target }}
         # For macOS builds, ensure osxcross is properly set up
-        - test -d /tmp/osxcross || git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
-        - cd /tmp/osxcross && ./tools/get_dependencies.sh || true
-        - cd /tmp/osxcross && wget -nc -q https://github.com/joseluisq/macosx-sdks/releases/download/12.3/MacOSX12.3.sdk.tar.xz -O ./tarballs/MacOSX12.3.sdk.tar.xz || true
-        - cd /tmp/osxcross && UNATTENDED=1 ./build.sh || true
-        - if [[ "{{ .Target }}" == *darwin* ]]; then export PATH="/tmp/osxcross/target/bin:$PATH"; fi
+        - if [[ "{{ .Target }}" == *apple-darwin* ]]; then
+            mkdir -p /tmp/osxcross || true;
+            export PATH="/tmp/osxcross/target/bin:$PATH";
+          fi
       post:
         - upx "{{ .Path }}" || true  # Add back the UPX compression but don't fail if it doesn't work
 
