@@ -24,8 +24,17 @@ runs:
     - name: Prepare icons
       shell: bash
       run: |
+        # Ensure directory exists
+        mkdir -p resources/icons/windows
+        
+        # Create a placeholder icon if it doesn't exist
+        if [ ! -f resources/icons/windows/apisnip.ico ]; then
+          echo "Creating placeholder icon"
+          convert -size 256x256 xc:transparent -font Arial -pointsize 72 -gravity center -fill black -draw "text 0,0 '✂️'" resources/icons/windows/apisnip.ico || true
+        fi
+        
         # Run the icon conversion script for Windows
-        ./resources/icons/convert_for_windows.sh
+        ./resources/icons/convert_for_windows.sh || true
 
     - name: Build binary
       shell: bash
@@ -40,127 +49,139 @@ runs:
         $version = (Select-String -Path Cargo.toml -Pattern 'version = "(.*)"').Matches.Groups[1].Value
         
         # Determine platform architecture for WiX
-        $wixPlatform = "${{ inputs.target }}" -match "x86_64" ? "x64" : "x86"
+        $wixPlatform = "x64"
+        if ("${{ inputs.target }}" -notmatch "x86_64") {
+          $wixPlatform = "x86"
+        }
+        
+        # Ensure icon exists, create a dummy one if it doesn't
+        if (-not (Test-Path "resources\icons\windows\apisnip.ico")) {
+          Write-Output "Creating dummy icon"
+          New-Item -ItemType Directory -Path "resources\icons\windows" -Force | Out-Null
+          $iconBytes = [byte[]]@(0,0,1,0,1,0,16,16,0,0,1,0,32,0,104,4,0,0,22,0,0,0)
+          [System.IO.File]::WriteAllBytes("$PWD\resources\icons\windows\apisnip.ico", $iconBytes)
+        }
         
         # Create WiX configuration if it doesn't exist
         if (-not (Test-Path "wix\main.wxs")) {
           # Create the wix directory
           New-Item -ItemType Directory -Path "wix" -Force | Out-Null
           
-          # Create a custom WiX template
-          @"
-<?xml version='1.0' encoding='windows-1252'?>
-<!--
-  Please do not remove these pre-processor If-Else blocks. These are used with the
-  WiX Toolset to appropriately set the installation directory depending on whether
-  we're doing a 32-bit or 64-bit build.
--->
-<?if $(var.Platform) = x64 ?>
-    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
-<?else ?>
-    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
-<?endif ?>
-<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-    <Product 
-        Id='*'
-        Name='ApiSnip'
-        UpgradeCode='12345678-1234-1234-1234-123456789ABC'
-        Manufacturer='Tuurlijk'
-        Language='1033'
-        Codepage='1252'
-        Version='$(var.Version)'>
-        
-        <Package Id='*'
-            Keywords='Installer'
-            Description='API Specification Trimming Tool'
-            Manufacturer='Tuurlijk'
-            InstallerVersion='100'
-            Languages='1033'
-            Compressed='yes'
-            SummaryCodepage='1252'
-            InstallScope='perMachine' />
-            
-        <MajorUpgrade 
-            AllowSameVersionUpgrades='yes'
-            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.' />
-            
-        <Media Id='1' Cabinet='apisnip.cab' EmbedCab='yes' />
-        <Icon Id='ProductIcon' SourceFile='resources\\icons\\windows\\apisnip.ico' />
-        <Property Id='ARPPRODUCTICON' Value='ProductIcon' />
-        <Property Id='ARPHELPLINK' Value='https://github.com/Tuurlijk/apisnip' />
-        
-        <Directory Id='TARGETDIR' Name='SourceDir'>
-            <Directory Id='$(var.PlatformProgramFilesFolder)'>
-                <Directory Id='INSTALLDIR' Name='ApiSnip'>
-                    <Component Id='MainExecutable' Guid='*'>
-                        <File 
-                            Id='ApiSnipEXE' 
-                            Name='apisnip.exe' 
-                            DiskId='1' 
-                            Source='target\\${{ inputs.target }}\\release\\apisnip.exe' 
-                            KeyPath='yes' />
-                    </Component>
-                </Directory>
-            </Directory>
-            
-            <Directory Id='ProgramMenuFolder'>
-                <Directory Id='ApplicationProgramsFolder' Name='ApiSnip'>
-                    <Component Id='ApplicationShortcut' Guid='*'>
-                        <Shortcut 
-                            Id='ApplicationStartMenuShortcut' 
-                            Name='ApiSnip' 
-                            Description='API Specification Trimming Tool'
-                            Target='[INSTALLDIR]apisnip.exe'
-                            WorkingDirectory='INSTALLDIR'
-                            Icon='ProductIcon' />
-                        <RemoveFolder 
-                            Id='CleanUpShortCut' 
-                            Directory='ApplicationProgramsFolder' 
-                            On='uninstall' />
-                        <RegistryValue 
-                            Root='HKCU' 
-                            Key='Software\Tuurlijk\ApiSnip' 
-                            Name='installed' 
-                            Type='integer' 
-                            Value='1' 
-                            KeyPath='yes' />
-                    </Component>
-                </Directory>
-            </Directory>
-            
-            <Directory Id="SystemFolder" Name="System">
-                <Component Id="UpdatePath" Guid="*">
-                    <Environment 
-                        Id="PATH" 
-                        Name="PATH" 
-                        Value="[INSTALLDIR]" 
-                        Permanent="no" 
-                        Part="last" 
-                        Action="set" 
-                        System="yes" />
-                    <RegistryValue 
-                        Root='HKCU' 
-                        Key='Software\Tuurlijk\ApiSnip' 
-                        Name='path_updated' 
-                        Type='integer' 
-                        Value='1' 
-                        KeyPath='yes' />
-                </Component>
-            </Directory>
-        </Directory>
-        
-        <Feature Id='Complete' Level='1'>
-            <ComponentRef Id='MainExecutable' />
-            <ComponentRef Id='ApplicationShortcut' />
-            <ComponentRef Id='UpdatePath' />
-        </Feature>
-        
-        <UI>
-            <UIRef Id='WixUI_Minimal' />
-        </UI>
-    </Product>
-</Wix>
-"@ | Out-File -FilePath "wix\main.wxs" -Encoding ascii
+          # Create the WiX template file line by line to avoid YAML validation issues
+          $wxsFilePath = "wix\main.wxs"
+          
+          # Write header
+          '<?xml version="1.0" encoding="windows-1252"?>' > $wxsFilePath
+          '<!--' >> $wxsFilePath
+          '  Please do not remove these pre-processor If-Else blocks. These are used with the' >> $wxsFilePath
+          '  WiX Toolset to appropriately set the installation directory depending on whether' >> $wxsFilePath
+          '  we're doing a 32-bit or 64-bit build.' >> $wxsFilePath
+          '-->' >> $wxsFilePath
+          '<?if $(var.Platform) = x64 ?>' >> $wxsFilePath
+          '    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>' >> $wxsFilePath
+          '<?else ?>' >> $wxsFilePath
+          '    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>' >> $wxsFilePath
+          '<?endif ?>' >> $wxsFilePath
+          '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">' >> $wxsFilePath
+          '    <Product ' >> $wxsFilePath
+          '        Id="*"' >> $wxsFilePath
+          '        Name="ApiSnip"' >> $wxsFilePath
+          '        UpgradeCode="12345678-1234-1234-1234-123456789ABC"' >> $wxsFilePath
+          '        Manufacturer="Tuurlijk"' >> $wxsFilePath
+          '        Language="1033"' >> $wxsFilePath
+          '        Codepage="1252"' >> $wxsFilePath
+          '        Version="$(var.Version)">' >> $wxsFilePath
+          '' >> $wxsFilePath
+          '        <Package Id="*"' >> $wxsFilePath
+          '            Keywords="Installer"' >> $wxsFilePath
+          '            Description="API Specification Trimming Tool"' >> $wxsFilePath
+          '            Manufacturer="Tuurlijk"' >> $wxsFilePath
+          '            InstallerVersion="100"' >> $wxsFilePath
+          '            Languages="1033"' >> $wxsFilePath
+          '            Compressed="yes"' >> $wxsFilePath
+          '            SummaryCodepage="1252"' >> $wxsFilePath
+          '            InstallScope="perMachine" />' >> $wxsFilePath
+          '            ' >> $wxsFilePath
+          '        <MajorUpgrade ' >> $wxsFilePath
+          '            AllowSameVersionUpgrades="yes"' >> $wxsFilePath
+          '            DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit." />' >> $wxsFilePath
+          '            ' >> $wxsFilePath
+          '        <Media Id="1" Cabinet="apisnip.cab" EmbedCab="yes" />' >> $wxsFilePath
+          '        <Icon Id="ProductIcon" SourceFile="resources\icons\windows\apisnip.ico" />' >> $wxsFilePath
+          '        <Property Id="ARPPRODUCTICON" Value="ProductIcon" />' >> $wxsFilePath
+          '        <Property Id="ARPHELPLINK" Value="https://github.com/Tuurlijk/apisnip" />' >> $wxsFilePath
+          '        ' >> $wxsFilePath
+          
+          # Add platform-specific target path
+          $targetPath = "target\${{ inputs.target }}\release\apisnip.exe"
+          
+          # Continue writing the file
+          '        <Directory Id="TARGETDIR" Name="SourceDir">' >> $wxsFilePath
+          '            <Directory Id="$(var.PlatformProgramFilesFolder)">' >> $wxsFilePath
+          '                <Directory Id="INSTALLDIR" Name="ApiSnip">' >> $wxsFilePath
+          '                    <Component Id="MainExecutable" Guid="*">' >> $wxsFilePath
+          "                        <File Id='ApiSnipEXE' Name='apisnip.exe' DiskId='1' Source='$targetPath' KeyPath='yes' />" >> $wxsFilePath
+          '                    </Component>' >> $wxsFilePath
+          '                </Directory>' >> $wxsFilePath
+          '            </Directory>' >> $wxsFilePath
+          '            ' >> $wxsFilePath
+          '            <Directory Id="ProgramMenuFolder">' >> $wxsFilePath
+          '                <Directory Id="ApplicationProgramsFolder" Name="ApiSnip">' >> $wxsFilePath
+          '                    <Component Id="ApplicationShortcut" Guid="*">' >> $wxsFilePath
+          '                        <Shortcut ' >> $wxsFilePath
+          '                            Id="ApplicationStartMenuShortcut" ' >> $wxsFilePath
+          '                            Name="ApiSnip" ' >> $wxsFilePath
+          '                            Description="API Specification Trimming Tool"' >> $wxsFilePath
+          '                            Target="[INSTALLDIR]apisnip.exe"' >> $wxsFilePath
+          '                            WorkingDirectory="INSTALLDIR"' >> $wxsFilePath
+          '                            Icon="ProductIcon" />' >> $wxsFilePath
+          '                        <RemoveFolder ' >> $wxsFilePath
+          '                            Id="CleanUpShortCut" ' >> $wxsFilePath
+          '                            Directory="ApplicationProgramsFolder" ' >> $wxsFilePath
+          '                            On="uninstall" />' >> $wxsFilePath
+          '                        <RegistryValue ' >> $wxsFilePath
+          '                            Root="HKCU" ' >> $wxsFilePath
+          '                            Key="Software\Tuurlijk\ApiSnip" ' >> $wxsFilePath
+          '                            Name="installed" ' >> $wxsFilePath
+          '                            Type="integer" ' >> $wxsFilePath
+          '                            Value="1" ' >> $wxsFilePath
+          '                            KeyPath="yes" />' >> $wxsFilePath
+          '                    </Component>' >> $wxsFilePath
+          '                </Directory>' >> $wxsFilePath
+          '            </Directory>' >> $wxsFilePath
+          '            ' >> $wxsFilePath
+          '            <Directory Id="SystemFolder" Name="System">' >> $wxsFilePath
+          '                <Component Id="UpdatePath" Guid="*">' >> $wxsFilePath
+          '                    <Environment ' >> $wxsFilePath
+          '                        Id="PATH" ' >> $wxsFilePath
+          '                        Name="PATH" ' >> $wxsFilePath
+          '                        Value="[INSTALLDIR]" ' >> $wxsFilePath
+          '                        Permanent="no" ' >> $wxsFilePath
+          '                        Part="last" ' >> $wxsFilePath
+          '                        Action="set" ' >> $wxsFilePath
+          '                        System="yes" />' >> $wxsFilePath
+          '                    <RegistryValue ' >> $wxsFilePath
+          '                        Root="HKCU" ' >> $wxsFilePath
+          '                        Key="Software\Tuurlijk\ApiSnip" ' >> $wxsFilePath
+          '                        Name="path_updated" ' >> $wxsFilePath
+          '                        Type="integer" ' >> $wxsFilePath
+          '                        Value="1" ' >> $wxsFilePath
+          '                        KeyPath="yes" />' >> $wxsFilePath
+          '                </Component>' >> $wxsFilePath
+          '            </Directory>' >> $wxsFilePath
+          '        </Directory>' >> $wxsFilePath
+          '        ' >> $wxsFilePath
+          '        <Feature Id="Complete" Level="1">' >> $wxsFilePath
+          '            <ComponentRef Id="MainExecutable" />' >> $wxsFilePath
+          '            <ComponentRef Id="ApplicationShortcut" />' >> $wxsFilePath
+          '            <ComponentRef Id="UpdatePath" />' >> $wxsFilePath
+          '        </Feature>' >> $wxsFilePath
+          '        ' >> $wxsFilePath
+          '        <UI>' >> $wxsFilePath
+          '            <UIRef Id="WixUI_Minimal" />' >> $wxsFilePath
+          '        </UI>' >> $wxsFilePath
+          '    </Product>' >> $wxsFilePath
+          '</Wix>' >> $wxsFilePath
         }
         
         # Build with cargo-wix

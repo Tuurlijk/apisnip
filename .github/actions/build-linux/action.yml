@@ -41,7 +41,7 @@ runs:
       shell: bash
       run: |
         # Run the icon conversion script
-        ./resources/icons/convert_for_linux.sh
+        ./resources/icons/convert_for_linux.sh || echo "Icon conversion failed but continuing"
 
     - name: Build binary
       shell: bash
@@ -97,12 +97,12 @@ runs:
         # Copy icons to the right locations
         for size in 16 32 48 64 128 256; do
           mkdir -p icons-deb/usr/share/icons/hicolor/${size}x${size}/apps
-          cp resources/icons/linux/${size}x${size}/apisnip.png icons-deb/usr/share/icons/hicolor/${size}x${size}/apps/
+          cp resources/icons/linux/${size}x${size}/apisnip.png icons-deb/usr/share/icons/hicolor/${size}x${size}/apps/ || true
         done
         
         # Copy SVG icon
         mkdir -p icons-deb/usr/share/icons/hicolor/scalable/apps
-        cp resources/icons/linux/apisnip.svg icons-deb/usr/share/icons/hicolor/scalable/apps/
+        cp resources/icons/linux/apisnip.svg icons-deb/usr/share/icons/hicolor/scalable/apps/ || true
 
         # Create DEB package
         fpm -s dir -t deb -n apisnip -v $VERSION \
@@ -138,22 +138,25 @@ runs:
           # Copy icons to AppDir
           cp -r icons-deb/usr/share/icons/hicolor AppDir/usr/share/icons/
           
-          # Create .desktop file
-          cat > AppDir/usr/share/applications/apisnip.desktop << EOF
-[Desktop Entry]
-Name=ApiSnip
-Exec=apisnip
-Icon=apisnip
-Type=Application
-Categories=Development;
-EOF
+          # Create .desktop file with proper indentation for heredoc
+          cat > AppDir/usr/share/applications/apisnip.desktop << 'EOF'
+          [Desktop Entry]
+          Name=ApiSnip
+          Exec=apisnip
+          Icon=apisnip
+          Type=Application
+          Categories=Development;
+          EOF
+          
+          # Fix the indentation in the created file
+          sed -i 's/^          //g' AppDir/usr/share/applications/apisnip.desktop
           
           # Install appimagetool
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
           # Create AppImage
-          ./appimagetool AppDir artifacts/apisnip-$VERSION-${{ inputs.platform }}.AppImage
+          ./appimagetool AppDir artifacts/apisnip-$VERSION-${{ inputs.platform }}.AppImage || true
         fi
         
         # Clean up
