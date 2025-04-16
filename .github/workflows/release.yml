@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
 
+
 jobs:
   build:
     name: Build for ${{ matrix.target }}
@@ -49,15 +50,12 @@ jobs:
           cargo install cross --locked
           cross --version
 
-      # Set up macOS environment (install Xcode command-line tools if needed)
+      # Set up macOS environment (if needed)
       - name: Set up macOS environment
         if: matrix.os == 'macos-latest'
         run: |
-          # Ensure Xcode command-line tools are installed
           xcode-select --install || true
-          # Accept Xcode license (if not already accepted)
           sudo xcodebuild -license accept || true
-          # Verify clang is available
           clang --version
 
       # Cache dependencies
@@ -67,18 +65,19 @@ jobs:
           path: |
             ~/.cargo/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
 
       # Build the binary
-      - name: Build
-        run: |
-          if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+      - name: Build (Linux with cross)
+        if: matrix.os == 'ubuntu-latest'
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (macOS/Windows)
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo build --release --target ${{ matrix.target }}
+        shell: bash
 
       # Prepare artifact
       - name: Prepare artifact
