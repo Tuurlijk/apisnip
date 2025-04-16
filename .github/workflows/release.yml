@@ -66,7 +66,7 @@ jobs:
             fi
             
             # Create GoReleaser dist structure and copy
-            dest_dir="dist/${project_name}_${target}"
+            dest_dir="dist/linux-win_${target}"
             mkdir -p "$dest_dir"
             cp "$src_path" "$dest_dir/$binary_name"
             echo "Copied $binary_name to $dest_dir"
