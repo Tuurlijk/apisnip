@@ -32,8 +32,6 @@ builds:
       - MACOSX_DEPLOYMENT_TARGET=10.7
       - CC=o64-clang
       - CXX=o64-clang++
-    ldflags:
-      - -s
     hooks:
       pre:
         - rustup target add {{ .Target }}
