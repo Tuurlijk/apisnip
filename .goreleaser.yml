@@ -1,12 +1,10 @@
 version: 2
 project_name: apisnip
 
-before:
-  hooks:
-    # We don't need this for Rust
-    # - go mod tidy
+# Build-only configuration
+# All other sections (archives, nfpms, release, etc.) removed
+# Kept for the build jobs
 
-# This is using GoReleaser's Rust support
 builds:
   - id: linux-win
     binary: apisnip
@@ -40,97 +38,4 @@ builds:
     hooks:
       pre:
         - rustup target add {{ .Target }}
-
-archives:
-  - format_overrides:
-      - goos: windows
-        formats: [ 'zip' ]
-    name_template: >-
-      {{ .ProjectName }}-
-      {{- .Version }}-
-      {{- if eq .Os "darwin" }}macos
-      {{- else }}{{ .Os }}{{ end }}-
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-
-nfpms:
-  - file_name_template: >-
-      {{ .ProjectName }}-
-      {{- .Version }}-
-      {{- .Os }}-
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-    homepage: https://github.com/Tuurlijk/apisnip
-    description: "A terminal user interface tool for trimming OpenAPI specifications down to size"
-    maintainer: Tuurlijk
-    license: MIT
-    vendor: Tuurlijk
-    formats:
-      - deb
-      - rpm
-      - apk
-      - archlinux
-      - termux
-      - flatpak
-      - snap
-      - nix
-      - ebuild
-    contents:
-      - src: resources/icons/linux/apisnip.svg
-        dst: /usr/share/icons/hicolor/scalable/apps/apisnip.svg
-      - src: resources/icons/linux/16x16/apisnip.png
-        dst: /usr/share/icons/hicolor/16x16/apps/apisnip.png
-      - src: resources/icons/linux/32x32/apisnip.png
-        dst: /usr/share/icons/hicolor/32x32/apps/apisnip.png
-      - src: resources/icons/linux/48x48/apisnip.png
-        dst: /usr/share/icons/hicolor/48x48/apps/apisnip.png
-      - src: resources/icons/linux/64x64/apisnip.png
-        dst: /usr/share/icons/hicolor/64x64/apps/apisnip.png
-      - src: resources/icons/linux/128x128/apisnip.png
-        dst: /usr/share/icons/hicolor/128x128/apps/apisnip.png
-      - src: resources/icons/linux/256x256/apisnip.png
-        dst: /usr/share/icons/hicolor/256x256/apps/apisnip.png
-
-universal_binaries:
-  - replace: true
-
-checksum:
-  name_template: 'checksums.txt'
-
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - Merge pull request
-      - Merge branch
-
-release:
-  github:
-    owner: Tuurlijk
-    name: apisnip
-  prerelease: auto
-  draft: false
-  mode: replace
-  footer: |
-    ## How to install
-    
-    ### macOS
-    ```bash
-    brew install tuurlijk/tap/apisnip
-    ```
-    
-    ### Linux
-    Download the .deb, .rpm, or .tar.gz file for your platform from the [releases page](https://github.com/Tuurlijk/apisnip/releases/latest)
-    
-    ### Windows
-    Download the Windows .zip file from the [releases page](https://github.com/Tuurlijk/apisnip/releases/latest)
-    
-    ### Binary
-    ```bash
-    curl -sfL https://raw.githubusercontent.com/Tuurlijk/apisnip/main/install.sh | sh
-    ```
+      # No post hook for macOS (UPX disabled)

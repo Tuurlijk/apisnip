@@ -66,7 +66,7 @@ jobs:
             fi
             
             # Create GoReleaser dist structure and copy
-            dest_dir="dist/linux-win_${target}"
+            dest_dir="dist/linux-win_${target}" # Use build ID 'linux-win'
             mkdir -p "$dest_dir"
             cp "$src_path" "$dest_dir/$binary_name"
             echo "Copied $binary_name to $dest_dir"
@@ -109,12 +109,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build macOS binaries with GoReleaser
+      - name: Build macOS binaries with GoReleaser (using .goreleaser.yml)
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: build --snapshot --clean --skip=validate --id=macos
+          args: build --snapshot --clean --id=macos -f .goreleaser.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -160,11 +160,11 @@ jobs:
       - name: List merged dist directory # For debugging
         run: ls -R dist
 
-      - name: Run GoReleaser to package and publish
+      - name: Run GoReleaser to package and publish (using .goreleaser-release.yml)
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean -f .goreleaser-release.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
