@@ -134,6 +134,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Clean dist directory
+        run: rm -rf dist/*
+
       - name: Download Linux/Windows artifact
         uses: actions/download-artifact@v4
         with:
