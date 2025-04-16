@@ -1,39 +1,87 @@
 name: Release Packages
 on:
   release:
-    types: [created]
+    types: [ created ]
 
 permissions:
   contents: write
 
 jobs:
-  # Single job using goreleaser-cross Docker image
-  goreleaser:
-    runs-on: ubuntu-22.04
+  build:
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-pc-windows-msvc
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact-name: linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            artifact-name: linux-aarch64
+          - target: x86_64-pc-windows-msvc
+            artifact-name: windows-x86_64
+            binary-suffix: .exe
+          - target: x86_64-apple-darwin
+            artifact-name: macos-x86_64
+          - target: aarch64-apple-darwin
+            artifact-name: macos-aarch64
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Rust
+      # Set up Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      # Install cross-rs
+      - name: Install cross
+        run: |
+          cargo install cross --locked
+          cross --version
+
+      # Cache dependencies
+      - name: Cache Cargo
+        uses: actions/cache@v4
         with:
-          components: clippy
-          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,i686-unknown-linux-gnu,x86_64-pc-windows-gnu,i686-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin
+          path: |
+            ~/.cargo/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      # Cache Rust dependencies
-      - uses: Swatinem/rust-cache@v2
+      # Build the binary
+      - name: Build with cross
+        run: |
+          cross build --release --target ${{ matrix.target }}
 
-      # Install UPX for binary compression
-      - name: Install UPX
-        run: sudo apt-get update && sudo apt-get install -y upx
+      # Prepare artifact
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          BINARY_NAME=$(grep '^name =' Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          SUFFIX="${{ matrix.binary-suffix }}"
+          mv target/${{ matrix.target }}/release/$BINARY_NAME$SUFFIX artifacts/$BINARY_NAME-${{ matrix.artifact-name }}$SUFFIX
 
-      # Run GoReleaser to build and publish in a container
-      - name: Run GoReleaser
-        uses: docker://ghcr.io/goreleaser/goreleaser-cross:v1.24
+      # Upload artifact
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          entrypoint: /bin/sh
-          args: -c "apt-get update && apt-get install -y curl && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH=$PATH:$HOME/.cargo/bin && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-pc-windows-gnu i686-pc-windows-gnu x86_64-apple-darwin aarch64-apple-darwin && goreleaser release --clean"
+          name: ${{ matrix.artifact-name }}
+          path: artifacts/
+
+      # Optionally publish to GitHub Release
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
