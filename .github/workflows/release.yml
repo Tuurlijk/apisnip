@@ -1,41 +1,121 @@
 name: Release Packages
 
-on:
-  release:
-    types: [ created ]
-
 permissions:
   contents: write
 
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  release:
+    types: [created, published]
 
 jobs:
-  build:
-    name: Build for ${{ matrix.target }}
+  build-binaries:
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            artifact-name: linux-x86_64
+          - name: Linux x86_64
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            artifact-name: linux-aarch64
+            target: x86_64-unknown-linux-gnu
+            asset_name: apisnip-linux-x86_64
+
+          - name: Linux ARM64
             os: ubuntu-latest
-          - target: x86_64-pc-windows-msvc
-            artifact-name: windows-x86_64
+            target: aarch64-unknown-linux-gnu
+            asset_name: apisnip-linux-arm64
+            use_cross: true
+
+          - name: Linux ARM32 (armv7)
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            asset_name: apisnip-linux-armv7
+            use_cross: true
+
+          - name: Linux ARM32 (Raspberry Pi)
+            os: ubuntu-latest
+            target: arm-unknown-linux-gnueabihf
+            asset_name: apisnip-linux-arm
+            use_cross: true
+
+          - name: Linux x86 (32-bit)
+            os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            asset_name: apisnip-linux-i686
+            use_cross: true
+
+          - name: Linux RISC-V 64-bit
+            os: ubuntu-latest
+            target: riscv64gc-unknown-linux-gnu
+            asset_name: apisnip-linux-riscv64
+            use_cross: true
+
+          - name: Linux MUSL x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset_name: apisnip-linux-musl-x86_64
+
+          - name: Windows x86_64
             os: windows-latest
-            binary-suffix: .exe
-          - target: x86_64-apple-darwin
-            artifact-name: macos-x86_64
+            target: x86_64-pc-windows-msvc
+            asset_name: apisnip-windows-x86_64
+            is_windows: true
+
+          - name: Windows x86 (32-bit)
+            os: windows-latest
+            target: i686-pc-windows-msvc
+            asset_name: apisnip-windows-i686
+            is_windows: true
+
+          - name: macOS x86_64
             os: macos-latest
-          - target: aarch64-apple-darwin
-            artifact-name: macos-aarch64
+            target: x86_64-apple-darwin
+            asset_name: apisnip-macos-x86_64
+
+          - name: macOS ARM64
             os: macos-latest
+            target: aarch64-apple-darwin
+            asset_name: apisnip-macos-arm64
 
     steps:
       # Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Extract version (for release naming)
+      - name: Extract version
+        id: extract-version
+        shell: bash
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "VERSION_NUM=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # Extract binary name from Cargo.toml
+      - name: Extract binary name
+        id: extract-binary
+        shell: bash
+        run: |
+          BINARY_NAME=$(grep '^name =' Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_OUTPUT
+          echo "Binary name is $BINARY_NAME"
+
+      # Install Linux dependencies
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config
+          if [[ "${{ matrix.target }}" == *"musl"* ]]; then
+            sudo apt-get install -y musl-tools
+          fi
 
       # Set up Rust toolchain
       - name: Install Rust
@@ -43,20 +123,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Install cross-rs for non-macOS/Windows targets
-      - name: Install cross
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cargo install cross --locked
-          cross --version
+      # Install Cross for cross-compilation targets
+      - name: Install Cross
+        if: matrix.use_cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
-      # Set up macOS environment (if needed)
-      - name: Set up macOS environment
-        if: matrix.os == 'macos-latest'
+      # Set up Cross configuration (optional linker)
+      - name: Set up Cross configuration
+        if: matrix.use_cross == true
         run: |
-          xcode-select --install || true
-          sudo xcodebuild -license accept || true
-          clang --version
+          echo "[target.${{ matrix.target }}]" > Cross.toml
+          echo "linker = 'gcc'" >> Cross.toml
 
       # Cache dependencies
       - name: Cache Cargo
@@ -70,36 +149,53 @@ jobs:
             ${{ runner.os }}-cargo-${{ matrix.target }}-
 
       # Build the binary
-      - name: Build (Linux with cross)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build with Cross (Linux cross-compilation)
+        if: matrix.os == 'ubuntu-latest' && matrix.use_cross == true
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Build (macOS/Windows)
-        if: matrix.os != 'ubuntu-latest'
+      - name: Build with Cargo (native builds)
+        if: matrix.os != 'ubuntu-latest' || matrix.use_cross != true
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
 
-      # Prepare artifact
-      - name: Prepare artifact
+      # Prepare artifacts
+      - name: Create tarball (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p artifacts
-          BINARY_NAME=$(grep '^name =' Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
-          SUFFIX="${{ matrix.binary-suffix }}"
-          mv target/${{ matrix.target }}/release/$BINARY_NAME$SUFFIX artifacts/$BINARY_NAME-${{ matrix.artifact-name }}$SUFFIX
+          mkdir -p release
+          BINARY_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}"
+          cp $BINARY_PATH release/
+          cp LICENSE README.md release/ || echo "LICENSE or README.md not found, skipping"
+          cd release
+          tar czf ../${{ matrix.asset_name }}.tar.gz *
+          cd ..
+          shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
 
-      # Upload artifact
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact-name }}
-          path: artifacts/
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir release
+          BINARY_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}${{ matrix.is_windows && '.exe' || '' }}"
+          cp $BINARY_PATH release/
+          cp LICENSE README.md release/ || echo "LICENSE or README.md not found, skipping"
+          cd release
+          7z a -tzip ../${{ matrix.asset_name }}.zip *
+          cd ..
+          certutil -hashfile ${{ matrix.asset_name }}.zip SHA256 > ${{ matrix.asset_name }}.zip.sha256
+          # Cleanup the certutil output to just the hash
+          sed -i -e '1d' -e '3d' ${{ matrix.asset_name }}.zip.sha256
 
-      # Optionally publish to GitHub Release
+      # Upload to GitHub Release
       - name: Upload to GitHub Release
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: |
+            ${{ matrix.asset_name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
+            ${{ matrix.asset_name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}.sha256
+          name: Release ${{ steps.extract-version.outputs.VERSION }}
+          tag_name: ${{ github.ref }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
