@@ -53,26 +53,16 @@ jobs:
       # Install macOS SDK for cross-compilation
       - name: Install macOS SDK
         run: |
-          # Install dependencies
-          sudo apt-get install -y cmake clang libssl-dev libxml2-dev zlib1g-dev
-          
-          # Create directory for SDK
-          mkdir -p /tmp/osxcross
-          cd /tmp/osxcross
-          
-          # Get macOS SDK and osxcross
-          wget -q https://github.com/tpoechtrager/osxcross/archive/refs/heads/master.zip
-          unzip -q master.zip
-          cd osxcross-master
-          
-          # Get Xcode SDK (using 10.13 which works well with Rust)
-          wget -q https://github.com/phracker/MacOSX-SDKs/releases/download/10.15/MacOSX10.15.sdk.tar.xz -O tarballs/MacOSX10.15.sdk.tar.xz
-          
-          # Build and install - with slightly reduced output to avoid log spam
-          PORTABLE=true SDK_VERSION=10.15 OSX_VERSION_MIN=10.13 ./build.sh > /dev/null
-          
-          # Add to path (needed for GoReleaser and Rust)
-          echo "/tmp/osxcross/osxcross-master/target/bin" >> $GITHUB_PATH
+          # Use a simpler approach with pre-built binaries
+          wget -q https://github.com/tpoechtrager/osxcross-target/releases/download/13.2/osxcross-darwin20.tar.xz
+          sudo mkdir -p /usr/local/osxcross
+          sudo tar -xf osxcross-darwin20.tar.xz -C /usr/local/osxcross
+          echo "/usr/local/osxcross/bin" >> $GITHUB_PATH
+          # Configure OSX cross-compilation environment
+          echo 'CC=o64-clang' >> $GITHUB_ENV
+          echo 'CXX=o64-clang++' >> $GITHUB_ENV
+          echo 'OSXCROSS_MP_INC=1' >> $GITHUB_ENV
+          echo 'LIBZ_SYS_STATIC=1' >> $GITHUB_ENV
       
       # Install UPX for binary compression
       - name: Install UPX
@@ -87,14 +77,12 @@ jobs:
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
           # Fix for ring crate when cross-compiling to macOS
+          echo 'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=o64-clang' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=oa64-clang' >> $GITHUB_ENV
           echo 'CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup' >> $GITHUB_ENV
           echo 'CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup' >> $GITHUB_ENV
-          # Disable ring's default features and use less problematic ones
-          echo 'CARGO_FEATURE_LESS_SAFE_GETRANDOM_CUSTOM_IMPLEMENTATION=1' >> $GITHUB_ENV
-          echo 'CARGO_FEATURE_PREFILL_CACHE_IN_THREAD=1' >> $GITHUB_ENV
-          # Disable debug assertions for ring
-          echo 'RING_CORE_PREFIX=/usr/local' >> $GITHUB_ENV
-          echo 'DEBUG=0' >> $GITHUB_ENV
+          # Handle any other macOS-specific environment variables
+          echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> $GITHUB_ENV
       
       # Run GoReleaser
       - name: Run GoReleaser
