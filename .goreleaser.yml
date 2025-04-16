@@ -35,11 +35,14 @@ builds:
     hooks:
       pre:
         - rustup target add {{ .Target }}
-        # For macOS builds, ensure osxcross is properly set up
-        - if [[ "{{ .Target }}" == *apple-darwin* ]]; then
-            mkdir -p /tmp/osxcross || true;
-            export PATH="/tmp/osxcross/target/bin:$PATH";
-          fi
+        # Conditionally set up PATH for macOS builds using POSIX sh syntax
+        - |
+          case "{{ .Target }}" in
+            *apple-darwin*)
+              mkdir -p /tmp/osxcross || true
+              export PATH="/tmp/osxcross/target/bin:$PATH"
+              ;;
+          esac
       post:
         - upx "{{ .Path }}" || true  # Add back the UPX compression but don't fail if it doesn't work
 
