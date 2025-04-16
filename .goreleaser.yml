@@ -27,19 +27,19 @@ builds:
       # - aarch64-apple-darwin
     flags:
       - --release
-    env:
-      # Required environment variables for macOS cross-compilation
-      - MACOSX_DEPLOYMENT_TARGET=10.7
-      - CC=o64-clang
-      - CXX=o64-clang++
+    # env:
+    #   # Required environment variables for macOS cross-compilation
+    #   - MACOSX_DEPLOYMENT_TARGET=10.7
+    #   - CC=o64-clang
+    #   - CXX=o64-clang++
     hooks:
       pre:
         - rustup target add {{ .Target }}
-        # Full osxcross setup for macOS targets
+        # Full osxcross setup and env vars for macOS targets
         - sh -c '
           case "{{ .Target }}" in 
             *apple-darwin*) 
-              echo "Setting up osxcross for {{ .Target }}...";
+              echo "Setting up osxcross and env for {{ .Target }}...";
               if [ ! -d /tmp/osxcross ]; then 
                 echo "Cloning osxcross..."; 
                 git clone https://github.com/tpoechtrager/osxcross.git /tmp/osxcross; 
@@ -53,12 +53,15 @@ builds:
               else 
                 echo "osxcross directory already exists."; 
               fi; 
-              echo "Adding osxcross to PATH..."; 
+              echo "Adding osxcross to PATH and setting CC/CXX..."; 
               export PATH="/tmp/osxcross/target/bin:$PATH"; 
-              echo "PATH set for macOS build.";
+              export MACOSX_DEPLOYMENT_TARGET=10.7
+              export CC=o64-clang
+              export CXX=o64-clang++
+              echo "Environment set for macOS build.";
               ;;
             *) 
-              echo "Not a macOS target, skipping osxcross setup.";
+              echo "Not a macOS target, skipping osxcross setup and env vars.";
               ;;
           esac
           '
