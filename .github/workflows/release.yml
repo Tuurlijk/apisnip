@@ -21,7 +21,7 @@ jobs:
           ./resources/icons/convert_all.sh
           
       - name: Upload converted icons
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: prepared-icons
           path: resources/icons
@@ -65,7 +65,7 @@ jobs:
       
       # Download prepared icons
       - name: Download icons
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: prepared-icons
           path: resources/icons
