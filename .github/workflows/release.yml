@@ -38,7 +38,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib
+          # For ARM64 cross-compilation
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y binutils-aarch64-linux-gnu 
+          sudo apt-get install -y libc6-dev-arm64-cross
+          # For i686 cross-compilation
           sudo apt-get install -y libc6-dev-i386
           # For Windows cross-compilation
           sudo apt-get install -y gcc-mingw-w64
@@ -52,6 +56,12 @@ jobs:
       
       # Cache dependencies
       - uses: Swatinem/rust-cache@v2
+      
+      # Set up cross-compilation environment variables
+      - name: Set up cross-compilation environment
+        run: |
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
       
       # Run GoReleaser
       - name: Run GoReleaser
