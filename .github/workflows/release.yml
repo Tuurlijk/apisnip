@@ -7,68 +7,137 @@ permissions:
   contents: write
 
 jobs:
-  # Release with GoReleaser
-  goreleaser:
+  # Build for Linux (x86_64, aarch64, i686) and Windows (x86_64, i686)
+  build-linux-win:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-        
-      # Install Rust
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      
-      # Install cross-compilation targets
-      - name: Install targets
+
+      - name: Install Linux/Windows targets
         run: |
           rustup target add x86_64-unknown-linux-gnu
           rustup target add aarch64-unknown-linux-gnu
           rustup target add i686-unknown-linux-gnu
-          rustup target add x86_64-apple-darwin
-          rustup target add aarch64-apple-darwin
-          rustup target add x86_64-pc-windows-msvc
-          rustup target add i686-pc-windows-msvc
-      
-      # Install dependencies for building packages
-      - name: Install dependencies
+          rustup target add x86_64-pc-windows-gnu
+          rustup target add i686-pc-windows-gnu
+
+      - name: Install Linux/Windows build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
-          # For ARM64 cross-compilation
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          sudo apt-get install -y binutils-aarch64-linux-gnu 
-          sudo apt-get install -y libc6-dev-arm64-cross
-          # For i686 cross-compilation
-          sudo apt-get install -y libc6-dev-i386
-          # For Windows cross-compilation
-          sudo apt-get install -y gcc-mingw-w64
-          # For packaging
-          sudo apt-get install -y ruby ruby-dev rpm build-essential
-          sudo gem install fpm
-      
-      # Set up cross-compilation environment variables
-      - name: Set up cross-compilation environment
+          sudo apt-get install -y --no-install-recommends \
+            gcc-multilib g++-multilib \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
+            libc6-dev-i386 \
+            gcc-mingw-w64 \
+            upx
+
+      - name: Set up Linux cross-compilation environment
         run: |
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
-      
-      # Install UPX for binary compression
-      - name: Install UPX
-        run: sudo apt-get install -y upx
-      
-      # Cache dependencies
+
       - uses: Swatinem/rust-cache@v2
-      
-      # Run GoReleaser
-      - name: Run GoReleaser
+
+      - name: Build Linux/Windows binaries with GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: build --snapshot --clean --skip=validate --id=apisnip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux/Windows dist artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: dist-linux-win
+          path: dist/
+
+  # Build for macOS (x86_64, aarch64)
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install macOS targets
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+
+      - name: Install macOS build dependencies
+        run: brew install upx
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build macOS binaries with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --snapshot --clean --skip=validate --id=apisnip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS dist artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: dist-macos
+          path: dist/
+
+  # Create GitHub Release using artifacts from build jobs
+  release:
+    runs-on: ubuntu-latest # Can run on ubuntu as it only packages/publishes
+    needs: [build-linux-win, build-macos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Download Linux/Windows artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: dist-linux-win
+          path: dist/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: dist-macos
+          path: dist/
+
+      # Ensure GoReleaser can run post-build hooks like UPX if needed during packaging
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends upx
+
+      # Install packaging deps for NFPM (deb/rpm)
+      - name: Install NFPM dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm ruby ruby-dev build-essential && sudo gem install fpm --no-document
+
+      - name: List merged dist directory # For debugging
+        run: ls -R dist
+
+      - name: Run GoReleaser to package and publish
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --skip=build --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
