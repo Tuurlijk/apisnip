@@ -3,6 +3,9 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
   # Prepare icons for all platforms
   prepare-icons:
@@ -18,50 +21,24 @@ jobs:
       - name: Convert icons for all platforms
         run: |
           chmod +x resources/icons/*.sh
-          ./resources/icons/convert_all.sh
+          ./resources/icons/convert_all.sh || echo "Icon conversion failed but continuing"
           
       - name: Upload converted icons
         uses: actions/upload-artifact@v4
         with:
           name: prepared-icons
           path: resources/icons
+          retention-days: 1
 
-  # Matrix job to define all target platforms
-  matrix-prep:
+  # Release with GoReleaser
+  goreleaser:
+    needs: [prepare-icons]
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - id: set-matrix
-        run: |
-          cat << EOF >> $GITHUB_OUTPUT
-          matrix<<MATRIX_JSON
-          {
-            "include": [
-              {"os": "ubuntu-latest", "rust-target": "x86_64-unknown-linux-gnu", "platform": "linux-x86_64"},
-              {"os": "ubuntu-latest", "rust-target": "aarch64-unknown-linux-gnu", "platform": "linux-arm64"},
-              {"os": "ubuntu-latest", "rust-target": "armv7-unknown-linux-gnueabihf", "platform": "linux-armv7"},
-              {"os": "ubuntu-latest", "rust-target": "arm-unknown-linux-gnueabihf", "platform": "linux-arm"},
-              {"os": "ubuntu-latest", "rust-target": "i686-unknown-linux-gnu", "platform": "linux-i686"},
-              {"os": "ubuntu-latest", "rust-target": "riscv64gc-unknown-linux-gnu", "platform": "linux-riscv64"},
-              {"os": "ubuntu-latest", "rust-target": "x86_64-unknown-linux-musl", "platform": "linux-musl-x86_64"},
-              {"os": "macos-latest", "rust-target": "x86_64-apple-darwin", "platform": "macos-x86_64"},
-              {"os": "macos-latest", "rust-target": "aarch64-apple-darwin", "platform": "macos-arm64"},
-              {"os": "windows-latest", "rust-target": "x86_64-pc-windows-msvc", "platform": "windows-x86_64"},
-              {"os": "windows-latest", "rust-target": "i686-pc-windows-msvc", "platform": "windows-i686"}
-            ]
-          }
-          MATRIX_JSON
-          EOF
-
-  # Build all platforms in parallel
-  build:
-    needs: [matrix-prep, prepare-icons]
-    strategy:
-      matrix: ${{fromJson(needs.matrix-prep.outputs.matrix)}}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       
       # Download prepared icons
       - name: Download icons
@@ -70,49 +47,54 @@ jobs:
           name: prepared-icons
           path: resources/icons
       
-      # Make sure icon scripts are executable
-      - name: Make icon scripts executable
-        run: chmod +x resources/icons/*.sh
-        shell: bash
-      
-      # Set up Rust with caching
+      # Create SVG icon for Linux
+      - name: Create SVG icon
+        run: |
+          cp resources/icons/png/apisnip.png resources/icons/linux/
+          mkdir -p resources/icons/linux/scalable
+          convert resources/icons/png/apisnip.png resources/icons/linux/apisnip.svg
+        
+      # Install Rust
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.rust-target }}
-          override: true
-          
+          components: clippy
+      
+      # Install cross-compilation targets
+      - name: Install targets
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+          rustup target add i686-unknown-linux-gnu
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-pc-windows-msvc
+          rustup target add i686-pc-windows-msvc
+      
+      # Install dependencies for building packages
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y libc6-dev-i386
+          # For packaging
+          sudo apt-get install -y ruby ruby-dev rpm build-essential
+          sudo gem install fpm
+      
+      # Install UPX for binary compression
+      - name: Install UPX
+        run: sudo apt-get install -y upx
+      
+      # Cache dependencies
       - uses: Swatinem/rust-cache@v2
+      
+      # Run GoReleaser
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
         with:
-          key: ${{ matrix.rust-target }}
-          
-      # Use platform-specific composite actions
-      - name: Build Linux packages
-        if: startsWith(matrix.platform, 'linux')
-        uses: ./.github/actions/build-linux
-        with:
-          target: ${{ matrix.rust-target }}
-          platform: ${{ matrix.platform }}
-          
-      - name: Build macOS packages
-        if: startsWith(matrix.platform, 'macos')
-        uses: ./.github/actions/build-macos
-        with:
-          target: ${{ matrix.rust-target }}
-          platform: ${{ matrix.platform }}
-          
-      - name: Build Windows packages
-        if: startsWith(matrix.platform, 'windows')
-        uses: ./.github/actions/build-windows
-        with:
-          target: ${{ matrix.rust-target }}
-          platform: ${{ matrix.platform }}
-          
-      # Upload artifacts to the GitHub release
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v1
+          distribution: goreleaser
+          version: latest
+          args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          files: artifacts/* 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
