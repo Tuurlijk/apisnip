@@ -49,20 +49,12 @@ jobs:
           # For packaging
           sudo apt-get install -y ruby ruby-dev rpm build-essential
           sudo gem install fpm
-          
-      # Install macOS SDK for cross-compilation
-      - name: Install macOS SDK
+      
+      # Set up cross-compilation environment variables
+      - name: Set up cross-compilation environment
         run: |
-          # Use a simpler approach with pre-built binaries
-          wget -q https://github.com/tpoechtrager/osxcross-target/releases/download/13.2/osxcross-darwin20.tar.xz
-          sudo mkdir -p /usr/local/osxcross
-          sudo tar -xf osxcross-darwin20.tar.xz -C /usr/local/osxcross
-          echo "/usr/local/osxcross/bin" >> $GITHUB_PATH
-          # Configure OSX cross-compilation environment
-          echo 'CC=o64-clang' >> $GITHUB_ENV
-          echo 'CXX=o64-clang++' >> $GITHUB_ENV
-          echo 'OSXCROSS_MP_INC=1' >> $GITHUB_ENV
-          echo 'LIBZ_SYS_STATIC=1' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
       
       # Install UPX for binary compression
       - name: Install UPX
@@ -70,19 +62,6 @@ jobs:
       
       # Cache dependencies
       - uses: Swatinem/rust-cache@v2
-      
-      # Set up cross-compilation environment variables
-      - name: Set up cross-compilation environment
-        run: |
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
-          # Fix for ring crate when cross-compiling to macOS
-          echo 'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=o64-clang' >> $GITHUB_ENV
-          echo 'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=oa64-clang' >> $GITHUB_ENV
-          echo 'CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup' >> $GITHUB_ENV
-          echo 'CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup' >> $GITHUB_ENV
-          # Handle any other macOS-specific environment variables
-          echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> $GITHUB_ENV
       
       # Run GoReleaser
       - name: Run GoReleaser

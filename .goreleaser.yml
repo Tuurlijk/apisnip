@@ -19,12 +19,12 @@ builds:
       - x86_64-unknown-linux-gnu
       - aarch64-unknown-linux-gnu
       - i686-unknown-linux-gnu
-      # macOS targets
-      - x86_64-apple-darwin
-      - aarch64-apple-darwin
       # Windows targets using GNU toolchain for cross-compilation
       - x86_64-pc-windows-gnu
       - i686-pc-windows-gnu
+      # macOS targets - temporarily disabled due to cross-compilation issues
+      # - x86_64-apple-darwin
+      # - aarch64-apple-darwin
     flags:
       - --release
     hooks:
