@@ -26,6 +26,34 @@ A terminal user interface (TUI) tool for trimming OpenAPI specifications down to
 cargo install apisnip
 ```
 
+### Pre-built Binaries
+
+Pre-built binary packages are available in the [GitHub releases](https://github.com/Tuurlijk/apisnip/releases). Each release includes a variety of package formats for different platforms:
+
+- **Linux**: `.deb`, `.rpm`, `.AppImage` (x86_64 only), and `.tar.gz` archives
+- **macOS**: `.dmg` and `.tar.gz` archives
+- **Windows**: `.msi` installers and `.zip` archives
+
+We support a wide range of architectures:
+- x86_64 (64-bit Intel/AMD)
+- aarch64/arm64 (64-bit ARM)
+- armv7 (32-bit ARM v7)
+- arm (32-bit ARM)
+- i686/i386 (32-bit Intel/AMD)
+- RISC-V 64-bit
+- x86_64 with MUSL libc
+
+To download and use a pre-built binary:
+
+1. Visit the [latest release page](https://github.com/Tuurlijk/apisnip/releases/latest)
+2. Download the appropriate package for your platform
+3. Install using your platform's standard method:
+   - Linux: Use your package manager with `.deb`/`.rpm` or run the `.AppImage`
+   - macOS: Open the `.dmg` and drag to Applications
+   - Windows: Run the `.msi` installer
+
+If you prefer not to use installers, the `.tar.gz` and `.zip` archives contain standalone binaries.
+
 ## 📖 Usage
 
 ```bash

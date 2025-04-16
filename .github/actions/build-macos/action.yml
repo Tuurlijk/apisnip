@@ -1,0 +1,103 @@
+name: 'Build macOS Packages'
+description: 'Build DMG and tarball packages for macOS platforms'
+inputs:
+  target:
+    required: true
+    description: 'Rust target triple'
+  platform:
+    required: true
+    description: 'Platform identifier'
+    
+runs:
+  using: "composite"
+  steps:
+    - name: Install tools
+      shell: bash
+      run: |
+        brew install create-dmg imagemagick
+
+    - name: Prepare icons
+      shell: bash
+      run: |
+        # Run the icon conversion script
+        ./resources/icons/convert_for_macos.sh
+
+    - name: Build binary
+      shell: bash
+      run: |
+        mkdir -p artifacts
+        cargo build --release --target ${{ inputs.target }}
+
+    - name: Create app structure
+      shell: bash
+      run: |
+        VERSION=$(grep -m 1 "version" Cargo.toml | cut -d '"' -f 2)
+        
+        # Create application bundle structure
+        mkdir -p Apisnip.app/Contents/{MacOS,Resources}
+        cp target/${{ inputs.target }}/release/apisnip Apisnip.app/Contents/MacOS/
+        chmod +x Apisnip.app/Contents/MacOS/apisnip
+        
+        # Copy the icon to Resources
+        cp resources/icons/macos/apisnip.icns Apisnip.app/Contents/Resources/
+        
+        # Create PkgInfo
+        echo "APPL????" > Apisnip.app/Contents/PkgInfo
+        
+        # Create Info.plist
+        cat > Apisnip.app/Contents/Info.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>apisnip</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.tuurlijk.apisnip</string>
+  <key>CFBundleName</key>
+  <string>Apisnip</string>
+  <key>CFBundleVersion</key>
+  <string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${VERSION}</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.13</string>
+  <key>CFBundleIconFile</key>
+  <string>apisnip.icns</string>
+</dict>
+</plist>
+EOF
+        
+    - name: Create DMG
+      shell: bash
+      run: |
+        VERSION=$(grep -m 1 "version" Cargo.toml | cut -d '"' -f 2)
+        
+        # Create DMG with scissors icon
+        create-dmg \
+          --volname "Apisnip" \
+          --background "white" \
+          --window-pos 200 120 \
+          --window-size 600 300 \
+          --icon-size 100 \
+          --icon "Apisnip.app" 150 150 \
+          --app-drop-link 450 150 \
+          --no-internet-enable \
+          "artifacts/apisnip-$VERSION-${{ inputs.platform }}.dmg" \
+          "Apisnip.app" || true
+        
+        # The create-dmg command sometimes exits with a non-zero code even when successful
+        # Check if the DMG was actually created
+        if [[ -f "artifacts/apisnip-$VERSION-${{ inputs.platform }}.dmg" ]]; then
+          echo "DMG successfully created"
+        else
+          echo "DMG creation failed"
+          exit 1
+        fi
+          
+        # Always create a tarball
+        tar -czf artifacts/apisnip-$VERSION-${{ inputs.platform }}.tar.gz -C target/${{ inputs.target }}/release apisnip 
