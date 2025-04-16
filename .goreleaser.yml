@@ -40,8 +40,6 @@ builds:
     hooks:
       pre:
         - rustup target add {{ .Target }}
-      post:
-        - upx "{{ .Path }}" || true
 
 archives:
   - format_overrides:

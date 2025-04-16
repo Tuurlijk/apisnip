@@ -32,28 +32,52 @@ jobs:
       - name: Install Linux/Windows build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-multilib g++-multilib \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
-            libc6-dev-i386 \
-            gcc-mingw-w64 \
-            upx
-
-      - name: Set up Linux cross-compilation environment
-        run: |
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-lgcc' >> $GITHUB_ENV
+          # Only install UPX now, cross handles toolchains
+          sudo apt-get install -y --no-install-recommends upx
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build Linux/Windows binaries with GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: build --snapshot --clean --skip=validate --id=linux-win
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cross-rs tool
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build Linux/Windows binaries with cross
+        run: |
+          targets=(
+            "x86_64-unknown-linux-gnu"
+            "aarch64-unknown-linux-gnu"
+            "i686-unknown-linux-gnu"
+            "x86_64-pc-windows-gnu"
+            "i686-pc-windows-gnu"
+          )
+          project_name="apisnip"
+          mkdir -p dist # Ensure dist exists
+
+          for target in "${targets[@]}"; do
+            echo "Building $project_name for $target using cross..."
+            cross build --release --target "$target"
+            
+            # Determine binary name and path
+            if [[ "$target" == *windows* ]]; then
+              binary_name="${project_name}.exe"
+              src_path="target/$target/release/$binary_name"
+            else
+              binary_name="$project_name"
+              src_path="target/$target/release/$binary_name"
+            fi
+            
+            # Create GoReleaser dist structure and copy
+            dest_dir="dist/${project_name}_${target}"
+            mkdir -p "$dest_dir"
+            cp "$src_path" "$dest_dir/$binary_name"
+            echo "Copied $binary_name to $dest_dir"
+            
+            # Run UPX
+            echo "Running UPX on $dest_dir/$binary_name..."
+            upx --best --lzma "$dest_dir/$binary_name" || echo "UPX failed for $target, continuing..."
+          done
+
+      - name: List dist directory contents # For debugging
+        run: ls -R dist
 
       - name: Upload Linux/Windows dist artifact
         uses: actions/upload-artifact@v4
