@@ -162,4 +162,4 @@ pub fn set_color_preferences(color_mode: &mut Mode, default_foreground_color: &m
             *color_mode = Mode::Dark;
         }
     }
-} 
+}
