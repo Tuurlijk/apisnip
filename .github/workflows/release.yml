@@ -165,6 +165,6 @@ jobs:
         with:
           distribution: goreleaser
           version: v2.8.2
-          args: release --clean
+          args: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
