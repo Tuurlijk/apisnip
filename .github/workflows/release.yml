@@ -7,52 +7,14 @@ permissions:
   contents: write
 
 jobs:
-  # Prepare icons for all platforms
-  prepare-icons:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install ImageMagick
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-          
-      - name: Convert icons for all platforms
-        run: |
-          chmod +x resources/icons/*.sh
-          ./resources/icons/convert_all.sh || echo "Icon conversion failed but continuing"
-          
-      - name: Upload converted icons
-        uses: actions/upload-artifact@v4
-        with:
-          name: prepared-icons
-          path: resources/icons
-          retention-days: 1
-
   # Release with GoReleaser
   goreleaser:
-    needs: [prepare-icons]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      
-      # Download prepared icons
-      - name: Download icons
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-icons
-          path: resources/icons
-      
-      # Create SVG icon for Linux
-      - name: Create SVG icon
-        run: |
-          cp resources/icons/png/apisnip.png resources/icons/linux/
-          mkdir -p resources/icons/linux/scalable
-          convert resources/icons/png/apisnip.png resources/icons/linux/apisnip.svg
         
       # Install Rust
       - name: Setup Rust
