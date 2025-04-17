@@ -338,33 +338,50 @@ if ! $DRY_RUN; then
     if [[ "$AUTO_EXECUTE" =~ ^[Yy]$ ]]; then
         step "Executing Steps 🚀"
         
-        execute "git commit -am \"Bump version to $NEW_VERSION\"" \
-                "Committing changes..." \
-                "Failed to commit changes. Please check your git status."
+        # Check if there are changes to commit
+        info "Checking git status..."
+        if ! git diff --quiet HEAD -- "$CARGO_TOML" "Cargo.lock"; then
+            # There are changes to commit
+            execute "git add $CARGO_TOML Cargo.lock" \
+                    "Staging changes..." \
+                    "Failed to stage changes."
+                    
+            if [ $? -eq 0 ]; then
+                execute "git commit -m \"Bump version to $NEW_VERSION\"" \
+                        "Committing changes..." \
+                        "Failed to commit changes. Please check your git status."
+            fi
+        else
+            warning "No changes detected in Cargo.toml or Cargo.lock. They might already be at version $NEW_VERSION."
+            info "Proceeding with tag creation anyway..."
+        fi
         
-        # Only proceed with tagging if commit was successful
-        if [ $? -eq 0 ]; then
+        # Always try to create the tag, even if commit failed (might be using existing commit)
+        # Check if tag already exists
+        if git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; then
+            warning "Tag v$NEW_VERSION already exists! Skipping tag creation."
+        else 
             execute "git tag -a \"v$NEW_VERSION\" -m \"Release v$NEW_VERSION\"" \
                     "Creating tag v$NEW_VERSION..." \
                     "Failed to create tag. Perhaps it already exists?"
+        fi
+        
+        # Only proceed with push if we have something to push (commit or tag)
+        if [ $? -eq 0 ]; then
+            # Confirm before pushing (this is a potentially risky operation)
+            printf "${YELLOW}Ready to push changes and tags to remote. Continue?${RESET} [y/N] "
+            read -r CONFIRM_PUSH
             
-            # Only proceed with push if tagging was successful
-            if [ $? -eq 0 ]; then
-                # Confirm before pushing (this is a potentially risky operation)
-                printf "${YELLOW}Ready to push changes and tags to remote. Continue?${RESET} [y/N] "
-                read -r CONFIRM_PUSH
+            if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+                execute "git push && git push --tags" \
+                        "Pushing changes and tags..." \
+                        "Failed to push. Do you have upstream permissions?"
                 
-                if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-                    execute "git push && git push --tags" \
-                            "Pushing changes and tags..." \
-                            "Failed to push. Do you have upstream permissions?"
-                    
-                    if [ $? -eq 0 ]; then
-                        success "All steps completed successfully! 🎉"
-                    fi
-                else
-                    info "Skipping push operation. Changes are committed locally."
+                if [ $? -eq 0 ]; then
+                    success "All steps completed successfully! 🎉"
                 fi
+            else
+                info "Skipping push operation. Changes are committed locally."
             fi
         fi
     else
