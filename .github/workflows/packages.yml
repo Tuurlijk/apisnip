@@ -40,12 +40,19 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            # Extract version from the release tag
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
             VERSION=${RELEASE_TAG#v}
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Extract from API response with safer parsing
+            RESPONSE='${{ steps.get_release.outputs.data }}'
+            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+            VERSION=${TAG_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           fi
-          echo "Using version: $VERSION"
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
 
       - name: Download Linux binary
         uses: robinraju/release-downloader@v1.8
@@ -130,12 +137,19 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            # Extract version from the release tag
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
             VERSION=${RELEASE_TAG#v}
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Extract from API response with safer parsing
+            RESPONSE='${{ steps.get_release.outputs.data }}'
+            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+            VERSION=${TAG_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           fi
-          echo "Using version: $VERSION"
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
           
       - name: Install RPM build tools
         run: sudo apt-get update && sudo apt-get install -y rpm
@@ -242,32 +256,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Get latest release
-        id: get_release
-        if: ${{ github.event.inputs.version == '' }}
-        run: |
-          REPO="${GITHUB_REPOSITORY}"
-          VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | jq -r '.tag_name')
-          VERSION=${VERSION#v}
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Using version from latest release: ${VERSION}"
-        
-      - name: Set version from input
-        id: set_version
-        if: ${{ github.event.inputs.version != '' }}
-        run: |
-          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          echo "Using version from input: ${{ github.event.inputs.version }}"
-      
-      - name: Set final version
+      - name: Extract version
         id: extract_version
         run: |
-          if [ -n "${{ steps.set_version.outputs.VERSION }}" ]; then
-            echo "VERSION=${{ steps.set_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            # Extract version from the release tag
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           else
-            echo "VERSION=${{ steps.get_release.outputs.VERSION }}" >> $GITHUB_OUTPUT
+            # If we got here, we need to manually get the latest release
+            REPO="${GITHUB_REPOSITORY}"
+            GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+            VERSION=$(curl -s ${GITHUB_API} | jq -r '.tag_name' | sed 's/^v//')
+            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           fi
-          echo "Final version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
 
       - name: Download Linux binary
         run: |
@@ -277,7 +283,7 @@ jobs:
             ARCH_NAME="arm64"
           fi
           
-          curl -L "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-linux-${ARCH_NAME}.tar.gz" -o downloaded/apisnip-linux.tar.gz
+          curl -L "https://github.com/${GITHUB_REPOSITORY}/releases/download/v$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)/apisnip-linux-${ARCH_NAME}.tar.gz" -o downloaded/apisnip-linux.tar.gz
 
       - name: Setup APK build environment
         run: |
@@ -375,12 +381,19 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            # Extract version from the release tag
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
             VERSION=${RELEASE_TAG#v}
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Extract from API response with safer parsing
+            RESPONSE='${{ steps.get_release.outputs.data }}'
+            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+            VERSION=${TAG_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           fi
-          echo "Using version: $VERSION"
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
 
       - name: Download macOS binaries
         uses: robinraju/release-downloader@v1.8
@@ -526,12 +539,19 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            # Extract version from the release tag
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
             VERSION=${RELEASE_TAG#v}
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Extract from API response with safer parsing
+            RESPONSE='${{ steps.get_release.outputs.data }}'
+            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+            VERSION=${TAG_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           fi
-          echo "Using version: $VERSION"
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
           
       - name: Download source code
         run: |
