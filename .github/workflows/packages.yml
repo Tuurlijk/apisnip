@@ -632,326 +632,211 @@ jobs:
       # and use git to push to the AUR. This is not implemented here as it
       # requires AUR account credentials. 
 
-  # Add a final job to organize release assets in the description
+  # Modify the organize-release-assets job to add more diagnostics
   organize-release-assets:
     name: Organize Release Assets
-    # Update to include all package creation jobs including Snap and Nix
-    needs: [create-debian-package, create-rpm-package, create-aur-package, create-macos-package, create-snap-package, create-nix-package]
-    # Skip the failing APK package job
+    # Update dependencies to remove the snap package
+    needs: [create-debian-package, create-rpm-package, create-aur-package, create-macos-package, create-nix-package]
     runs-on: ubuntu-latest
     if: always() # Run even if some of the previous jobs failed
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Version
+      - name: Setup debugging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Extract Version (Debug Step 1)
         id: extract_version
         run: |
           if [ "${{ github.event.inputs.version }}" != "" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.inputs.version }}"
           elif [ "${{ github.event_name }}" == "release" ]; then
-            RELEASE_TAG="${{ github.event.release.tag_name }}"
-            VERSION=${RELEASE_TAG#v}
-            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION=${VERSION#v}
           else
             # Get latest release tag
             REPO="${GITHUB_REPOSITORY}"
+            echo "Getting version from latest release for $REPO"
             GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-            VERSION=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name' | sed 's/^v//')
-            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+            API_RESPONSE=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}")
+            echo "API Response: $API_RESPONSE" | head -20 # Show first 20 lines for debugging
+            VERSION=$(echo "$API_RESPONSE" | jq -r '.tag_name' | sed 's/^v//')
           fi
-          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
-          echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
-
-      - name: Get All Assets
-        id: get_assets
-        run: |
-          RELEASE_TAG="v${VERSION}"
-          ASSETS=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" \
-            | jq -r '.assets[] | "\(.name) \(.browser_download_url)"')
           
-          echo "ASSETS<<EOF" >> $GITHUB_ENV
-          echo "$ASSETS" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "Extracted version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Get Existing Release ID
+      - name: Get Release ID (Debug Step 2)
         id: get_release_id
         run: |
           RELEASE_TAG="v${VERSION}"
-          RELEASE_DATA=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")
+          echo "Getting information for release: $RELEASE_TAG"
           
-          RELEASE_ID=$(echo "$RELEASE_DATA" | jq -r '.id')
-          EXISTING_BODY=$(echo "$RELEASE_DATA" | jq -r '.body // ""')
+          RELEASE_API="https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG"
+          echo "API Endpoint: $RELEASE_API"
           
-          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
+          RELEASE_DATA=$(curl -s "$RELEASE_API" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}")
+          echo "API Response first 20 lines:"
+          echo "$RELEASE_DATA" | head -20
           
-          # Check if body already contains our asset tables (to avoid duplicates)
-          if echo "$EXISTING_BODY" | grep -q "## Binary Downloads"; then
-            # If our sections already exist, just preserve the original body
-            echo "EXISTING_BODY<<EOF" >> $GITHUB_ENV
-            echo "$EXISTING_BODY" >> $GITHUB_ENV 
-            echo "EOF" >> $GITHUB_ENV
-            echo "CONTAINS_ASSETS=true" >> $GITHUB_OUTPUT
-          else
-            # If our sections don't exist, we'll append them
-            echo "EXISTING_BODY<<EOF" >> $GITHUB_ENV
-            echo "$EXISTING_BODY" >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
-            echo "CONTAINS_ASSETS=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Organize Assets by Category
-        id: organize_assets
-        if: steps.get_release_id.outputs.CONTAINS_ASSETS != 'true'
-        run: |
-          # Function to create a category section with assets
-          create_category() {
-            local category=$1
-            local pattern=$2
-            local title=$3
-            
-            echo -e "### $title\n"
-            
-            # Filter assets matching the pattern and create markdown links
-            matching_assets=$(echo "$ASSETS" | grep -i "$pattern" | grep -v "\.sha256$" | sort)
-            if [ -z "$matching_assets" ]; then
-              echo "No $category packages available."
-            else
-              echo "| Package | SHA256 |"
-              echo "|---------|--------|"
-              echo "$matching_assets" | while read -r line; do
-                name=$(echo "$line" | awk '{print $1}')
-                url=$(echo "$line" | awk '{print $2}')
-                sha_line=$(echo "$ASSETS" | grep "${name}\.sha256")
-                if [ -n "$sha_line" ]; then
-                  sha_url=$(echo "$sha_line" | awk '{print $2}')
-                  echo "| [$name]($url) | [SHA256]($sha_url) |"
-                else
-                  echo "| [$name]($url) | N/A |"
-                fi
-              done
-            fi
-            echo ""
-          }
+          # Check if we got a proper response
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$RELEASE_API" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}")
+          echo "HTTP Status Code: $HTTP_STATUS"
           
-          # Create temporary markdown files for each category
-          TMP_DIR=$(mktemp -d)
-          
-          # Linux Binaries
-          create_category "Linux" "linux" "Linux Binaries" > "$TMP_DIR/linux.md"
-          
-          # Windows Binaries
-          create_category "Windows" "windows" "Windows Binaries" > "$TMP_DIR/windows.md"
-          
-          # macOS Binaries
-          create_category "macOS" "macos" "macOS Binaries" > "$TMP_DIR/macos.md"
-          
-          # FreeBSD Binaries
-          create_category "FreeBSD" "freebsd" "FreeBSD Binaries" > "$TMP_DIR/freebsd.md"
-          
-          # NetBSD Binaries
-          create_category "NetBSD" "netbsd" "NetBSD Binaries" > "$TMP_DIR/netbsd.md"
-          
-          # Debian/Ubuntu Packages
-          create_category "Debian" "_amd64\.deb\|_arm64\.deb\|_i386\.deb" "Debian/Ubuntu Packages (.deb)" > "$TMP_DIR/debian.md"
-          
-          # RPM Packages
-          create_category "RPM" "\.rpm" "Red Hat/Fedora/SUSE Packages (.rpm)" > "$TMP_DIR/rpm.md"
-          
-          # AUR Package
-          create_category "AUR" "aur" "Arch Linux Package (AUR)" > "$TMP_DIR/aur.md"
-          
-          # Homebrew Formula
-          create_category "Homebrew" "homebrew" "macOS Homebrew Formula" > "$TMP_DIR/homebrew.md"
-          
-          # DMG Package
-          create_category "DMG" "\.dmg" "macOS Disk Image (.dmg)" > "$TMP_DIR/dmg.md"
-          
-          # Snap Package
-          create_category "Snap" "\.snap" "Snap Packages" > "$TMP_DIR/snap.md"
-          
-          # Nix Package
-          create_category "Nix" "\.nix" "Nix Packages" > "$TMP_DIR/nix.md"
-          
-          # Combine all sections
-          {
-            echo -e "\n## Binary Downloads\n"
-            cat "$TMP_DIR/linux.md"
-            cat "$TMP_DIR/windows.md"
-            cat "$TMP_DIR/macos.md"
-            cat "$TMP_DIR/freebsd.md"
-            cat "$TMP_DIR/netbsd.md"
-            
-            echo -e "## Package Downloads\n"
-            cat "$TMP_DIR/debian.md"
-            cat "$TMP_DIR/rpm.md"
-            cat "$TMP_DIR/aur.md"
-            cat "$TMP_DIR/homebrew.md"
-            cat "$TMP_DIR/dmg.md"
-            cat "$TMP_DIR/snap.md"
-            cat "$TMP_DIR/nix.md"
-          } > assets_section.md
-          
-          # Combine existing body with asset tables
-          if [ -n "$EXISTING_BODY" ]; then
-            COMBINED_BODY="${EXISTING_BODY}$(cat assets_section.md)"
-          else
-            COMBINED_BODY="## ApiSnip v${VERSION}"
-            COMBINED_BODY="${COMBINED_BODY}\n\n"
-            COMBINED_BODY="${COMBINED_BODY}A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️"
-            COMBINED_BODY="${COMBINED_BODY}\n\n"
-            COMBINED_BODY="${COMBINED_BODY}$(cat assets_section.md)"
-          fi
-          
-          echo "$COMBINED_BODY" > combined_body.md
-
-      - name: Update Release Description
-        if: steps.get_release_id.outputs.CONTAINS_ASSETS != 'true'
-        run: |
-          RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
-          
-          # Use curl instead of GitHub CLI to avoid YAML parsing issues with markdown content
-          ESCAPED_BODY=$(cat combined_body.md | jq -sR .)
-          
-          curl -X PATCH \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
-            -d "{\"body\": $ESCAPED_BODY}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log Status
-        run: |
-          if [ "${{ steps.get_release_id.outputs.CONTAINS_ASSETS }}" == "true" ]; then
-            echo "Release description already contains asset tables. No changes made."
-          else
-            echo "Release description updated with organized asset tables."
-          fi
-
-  # Add new Snap Package job
-  create-snap-package:
-    name: Create Snap Package
-    runs-on: ubuntu-latest
-    needs: [create-debian-package] # Depends on Debian package for metadata
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Extract version
-        id: extract_version
-        run: |
-          if [ "${{ github.event.inputs.version }}" != "" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "release" ]; then
-            RELEASE_TAG="${{ github.event.release.tag_name }}"
-            VERSION=${RELEASE_TAG#v}
-            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          else
-            # Get latest release tag
-            REPO="${GITHUB_REPOSITORY}"
-            GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-            VERSION=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name' | sed 's/^v//')
-            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          fi
-          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
-          echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
-
-      - name: Download Linux binary
-        uses: robinraju/release-downloader@v1.8
-        with:
-          repository: ${{ github.repository }}
-          tag: "v${{ env.VERSION }}"
-          fileName: "apisnip-linux-x86_64.tar.gz"
-          out-file-path: ./downloaded
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Snap directory structure
-        run: |
-          mkdir -p snap-build/bin
-          mkdir -p snap-build/snap
-          
-          # Extract binary
-          tar -xzf ./downloaded/apisnip-linux-x86_64.tar.gz -C snap-build
-          
-          # Move binary to the right place
-          if [ -f "snap-build/apisnip" ]; then
-            mv snap-build/apisnip snap-build/bin/
-          elif [ -f "snap-build/usr/bin/apisnip" ]; then
-            mkdir -p snap-build/bin
-            mv snap-build/usr/bin/apisnip snap-build/bin/
-          fi
-          
-          # Ensure binary is executable
-          chmod +x snap-build/bin/apisnip
-          
-          # Create snapcraft.yaml in snap/ directory
-          cat > snap-build/snap/snapcraft.yaml << EOF
-          name: apisnip
-          version: ${{ env.VERSION }}
-          summary: A terminal user interface tool for trimming OpenAPI specifications
-          description: |
-            ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
-            to only the parts you need. It provides a user-friendly terminal interface for
-            selecting specific endpoints and data models.
-          
-          base: core20
-          confinement: strict
-          grade: stable
-          
-          parts:
-            apisnip:
-              plugin: dump
-              source: .
-              stage-packages:
-                - libssl1.1
-                - ca-certificates
-          
-          apps:
-            apisnip:
-              command: bin/apisnip
-              plugs:
-                - home
-                - network
-                - network-bind
-          EOF
-
-      - name: Build Snap package using Docker
-        id: build_snap
-        run: |
-          # Use Docker snapcraft image instead of multipass
-          docker run --rm -v $(pwd)/snap-build:/build -w /build snapcore/snapcraft:stable snapcraft
-          
-          # Find the snap file
-          SNAP_FILE=$(find snap-build -name "*.snap" | head -1)
-          if [ -z "$SNAP_FILE" ]; then
-            echo "Error: No snap file found"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Error: Failed to get release data. HTTP Status: $HTTP_STATUS"
             exit 1
           fi
           
-          # Get the filename
-          SNAP_FILENAME=$(basename "$SNAP_FILE")
-          cp "$SNAP_FILE" ./
+          RELEASE_ID=$(echo "$RELEASE_DATA" | jq -r '.id')
+          echo "Release ID: $RELEASE_ID"
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
           
-          echo "SNAP_FILENAME=$SNAP_FILENAME" >> $GITHUB_OUTPUT
+          # Save the body for later use
+          EXISTING_BODY=$(echo "$RELEASE_DATA" | jq -r '.body // ""')
+          echo "Existing body (first 100 chars):"
+          echo "$EXISTING_BODY" | head -c 100
+          echo
           
-          # Create checksum
-          sha256sum "$SNAP_FILENAME" > "${SNAP_FILENAME}.sha256"
+          # Store the body content in a file for inspection
+          echo "$EXISTING_BODY" > existing_body.txt
+          
+          echo "EXISTING_BODY=$EXISTING_BODY" >> $GITHUB_ENV
 
-      - name: Upload Snap package to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.build_snap.outputs.SNAP_FILENAME }}
-            ${{ steps.build_snap.outputs.SNAP_FILENAME }}.sha256
-          tag_name: v${{ env.VERSION }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get All Assets (Debug Step 3)
+        id: get_assets
+        run: |
+          echo "Getting assets for release: v${VERSION}"
+          ASSETS_API="https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}/assets"
+          
+          ASSETS_DATA=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.assets[] | "\(.name) \(.browser_download_url)"')
+          
+          # Check if we got any assets
+          if [ -z "$ASSETS_DATA" ]; then
+            echo "Warning: No assets found for the release"
+            # Create a minimal assets file for testing
+            echo "test-file.txt https://example.com/test-file.txt" > assets.txt
+          else
+            echo "Found $(echo "$ASSETS_DATA" | wc -l) assets"
+            echo "$ASSETS_DATA" > assets.txt
+          fi
+          
+          # List the first 5 assets for debugging
+          echo "First 5 assets:"
+          head -5 assets.txt
+          
+          # Make the assets available as an environment variable
+          echo "ASSETS<<EOF" >> $GITHUB_ENV
+          cat assets.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create Test Asset Categories (Debug Step 4)
+        id: create_test_categories
+        run: |
+          # Create a simplified version of the assets table in markdown
+          cat > test_assets.md << EOF
+          ## Binary Downloads
+          
+          ### Linux Binaries
+          | Package | SHA256 |
+          |---------|--------|
+          | [apisnip-linux-x86_64.tar.gz](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          
+          ### Windows Binaries
+          | Package | SHA256 |
+          |---------|--------|
+          | [apisnip-windows-x86_64.zip](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          
+          ## Package Downloads
+          
+          ### Debian/Ubuntu Packages (.deb)
+          | Package | SHA256 |
+          |---------|--------|
+          | [apisnip_1.0.0_amd64.deb](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          EOF
+          
+          echo "Created test assets file:"
+          cat test_assets.md
+
+      - name: Combine Content (Debug Step 5)
+        id: combine_content
+        run: |
+          # Create a simplified combined body
+          if [ -n "$EXISTING_BODY" ]; then
+            echo "Using existing body and appending test content"
+            echo "$EXISTING_BODY" > combined_body.md
+            cat test_assets.md >> combined_body.md
+          else
+            echo "Creating a new body with version and test content"
+            echo "## ApiSnip v${VERSION}" > combined_body.md
+            echo "" >> combined_body.md
+            echo "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️" >> combined_body.md
+            echo "" >> combined_body.md
+            cat test_assets.md >> combined_body.md
+          fi
+          
+          echo "First 20 lines of combined body:"
+          head -20 combined_body.md
+          
+          # Escape the content for JSON
+          ESCAPED_CONTENT=$(cat combined_body.md | jq -Rs .)
+          echo "First 100 chars of escaped content:"
+          echo "$ESCAPED_CONTENT" | head -c 100
+          echo
+          
+          # Store in a file for the update step
+          echo "$ESCAPED_CONTENT" > escaped_content.json
+
+      - name: Update Release Description (Debug Step 6)
+        run: |
+          RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
+          ESCAPED_CONTENT=$(cat escaped_content.json)
+          
+          echo "Using simplified JSON payload for testing"
+          echo "{\"body\": \"Test update from GitHub Actions\"}" > test_payload.json
+          
+          echo "Sending test update to release ID: $RELEASE_ID"
+          HTTP_STATUS=$(curl -s -o update_response.txt -w "%{http_code}" \
+            -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
+            -d @test_payload.json)
+          
+          echo "Update HTTP Status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ Test update successful"
+          else
+            echo "❌ Test update failed"
+            echo "Response:"
+            cat update_response.txt
+            exit 1
+          fi
+          
+      - name: Final Update (Debug Step 7)
+        if: false # Skip this step for now while debugging
+        run: |
+          RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
+          ESCAPED_CONTENT=$(cat escaped_content.json)
+          
+          echo "Sending final update to release ID: $RELEASE_ID"
+          curl -s -o final_response.txt \
+            -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
+            -d "{\"body\": ${ESCAPED_CONTENT}}"
+          
+          echo "Response:"
+          cat final_response.txt
 
   # Add new Nix Package job
   create-nix-package:
