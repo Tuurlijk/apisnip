@@ -3,6 +3,16 @@ name: Create Platform Packages
 permissions:
   contents: write
 
+env:
+  PACKAGE_NAME: apisnip
+  PACKAGE_DESCRIPTION: "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
+  PACKAGE_LONG_DESCRIPTION: "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications to only the parts you need. It provides a user-friendly terminal interface for selecting specific endpoints and data models."
+  MAINTAINER_NAME: "Michiel Roos"
+  MAINTAINER_EMAIL: "apisnip.zumble.frap@michielroos.com"
+  GITHUB_REPO: "Tuurlijk/apisnip"
+  PACKAGE_HOMEPAGE: "https://github.com/Tuurlijk/apisnip"
+  PACKAGE_LICENSE: "MIT"
+
 on:
   # Triggered after a release is created
   release:
@@ -57,19 +67,19 @@ jobs:
       - name: Download Linux binary
         uses: robinraju/release-downloader@v1.8
         with:
-          repository: ${{ github.repository }}
+          repository: ${{ env.GITHUB_REPO }}
           tag: "v${{ steps.extract_version.outputs.VERSION }}"
-          fileName: "apisnip-linux-${{ matrix.arch == 'amd64' && 'x86_64' || (matrix.arch == 'i386' && 'i686' || matrix.arch) }}.tar.gz"
+          fileName: "${{ env.PACKAGE_NAME }}-linux-${{ matrix.arch == 'amd64' && 'x86_64' || (matrix.arch == 'i386' && 'i686' || matrix.arch) }}.tar.gz"
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract binary
         run: |
           mkdir -p pkg/usr/bin
-          mkdir -p pkg/usr/share/doc/apisnip
-          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C ./pkg/usr/bin apisnip
-          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
-          chmod +x pkg/usr/bin/apisnip
+          mkdir -p pkg/usr/share/doc/${{ env.PACKAGE_NAME }}
+          tar -xzf ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz -C ./pkg/usr/bin ${{ env.PACKAGE_NAME }}
+          cp README.md LICENSE pkg/usr/share/doc/${{ env.PACKAGE_NAME }}/ || true
+          chmod +x pkg/usr/bin/${{ env.PACKAGE_NAME }}
 
       - name: Create Debian package
         id: create_deb
@@ -83,20 +93,18 @@ jobs:
           # Create Debian control file
           mkdir -p pkg/DEBIAN
           cat > pkg/DEBIAN/control << EOF
-          Package: apisnip
+          Package: ${{ env.PACKAGE_NAME }}
           Version: ${{ steps.extract_version.outputs.VERSION }}
           Section: utils
           Priority: optional
           Architecture: ${DEBIAN_ARCH}
-          Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
-          Description: A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
-           ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
-           to only the parts you need. It provides a user-friendly terminal interface for
-           selecting specific endpoints and data models.
+          Maintainer: ${{ env.MAINTAINER_NAME }} <${{ env.MAINTAINER_EMAIL }}>
+          Description: ${{ env.PACKAGE_DESCRIPTION }}
+           ${{ env.PACKAGE_LONG_DESCRIPTION }}
           EOF
           
           # Build the package
-          DEB_FILENAME="apisnip_${{ steps.extract_version.outputs.VERSION }}_${DEBIAN_ARCH}.deb"
+          DEB_FILENAME="${{ env.PACKAGE_NAME }}_${{ steps.extract_version.outputs.VERSION }}_${DEBIAN_ARCH}.deb"
           dpkg-deb --build pkg "${DEB_FILENAME}"
           echo "DEB_FILENAME=${DEB_FILENAME}" >> $GITHUB_OUTPUT
           
@@ -158,56 +166,54 @@ jobs:
       - name: Download Linux binary
         uses: robinraju/release-downloader@v1.8
         with:
-          repository: ${{ github.repository }}
+          repository: ${{ env.GITHUB_REPO }}
           tag: "v${{ steps.extract_version.outputs.VERSION }}"
-          fileName: "apisnip-linux-${{ matrix.arch }}.tar.gz"
+          fileName: "${{ env.PACKAGE_NAME }}-linux-${{ matrix.arch }}.tar.gz"
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify downloaded file
         run: |
           ls -la ./downloaded/
-          if [ ! -s ./downloaded/apisnip-linux-*.tar.gz ]; then
+          if [ ! -s ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz ]; then
             echo "Error: Downloaded file is empty or does not exist"
             exit 1
           fi
-          file ./downloaded/apisnip-linux-*.tar.gz
+          file ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz
 
       - name: Setup RPM build environment
         run: |
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}
+          mkdir -p ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}
           
           # Extract binary
-          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin
-          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/apisnip
-          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin apisnip
-          cp README.md LICENSE ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/apisnip/ || true
-          chmod +x ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin/apisnip
+          mkdir -p ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}/usr/bin
+          mkdir -p ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/${{ env.PACKAGE_NAME }}
+          tar -xzf ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz -C ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}/usr/bin ${{ env.PACKAGE_NAME }}
+          cp README.md LICENSE ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/${{ env.PACKAGE_NAME }}/ || true
+          chmod +x ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}/usr/bin/${{ env.PACKAGE_NAME }}
           
           # Create source tarball
           cd ~/rpmbuild/SOURCES
-          tar -czf apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz apisnip-${{ steps.extract_version.outputs.VERSION }}
+          tar -czf ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.tar.gz ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}
 
       - name: Create spec file
         run: |
-          cat > ~/rpmbuild/SPECS/apisnip.spec << EOF
-          Name:           apisnip
+          cat > ~/rpmbuild/SPECS/${{ env.PACKAGE_NAME }}.spec << EOF
+          Name:           ${{ env.PACKAGE_NAME }}
           Version:        ${{ steps.extract_version.outputs.VERSION }}
           Release:        1%{?dist}
-          Summary:        A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+          Summary:        ${{ env.PACKAGE_DESCRIPTION }}
           
-          License:        MIT
-          URL:            https://github.com/Tuurlijk/apisnip
+          License:        ${{ env.PACKAGE_LICENSE }}
+          URL:            ${{ env.PACKAGE_HOMEPAGE }}
           Source0:        %{name}-%{version}.tar.gz
           
           # Specify architecture explicitly without macros that might cause issues
           BuildArch:      ${{ matrix.arch }}
           
           %description
-          ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
-          to only the parts you need. It provides a user-friendly terminal interface for
-          selecting specific endpoints and data models.
+          ${{ env.PACKAGE_LONG_DESCRIPTION }}
           
           %prep
           %setup -q
@@ -217,24 +223,24 @@ jobs:
           cp -a * %{buildroot}
           
           %files
-          %{_bindir}/apisnip
-          %doc %{_docdir}/apisnip/README.md
-          %license %{_docdir}/apisnip/LICENSE
+          %{_bindir}/${{ env.PACKAGE_NAME }}
+          %doc %{_docdir}/${{ env.PACKAGE_NAME }}/README.md
+          %license %{_docdir}/${{ env.PACKAGE_NAME }}/LICENSE
           
           %changelog
-          * $(date '+%a %b %d %Y') GitHub Action <apisnip.zumble.frap@michielroos.com> - ${{ steps.extract_version.outputs.VERSION }}-1
+          * $(date '+%a %b %d %Y') ${{ env.MAINTAINER_NAME }} <${{ env.MAINTAINER_EMAIL }}> - ${{ steps.extract_version.outputs.VERSION }}-1
           - Automated package build
           EOF
 
       - name: Build RPM package
         id: build_rpm
         run: |
-          rpmbuild -ba ~/rpmbuild/SPECS/apisnip.spec || {
+          rpmbuild -ba ~/rpmbuild/SPECS/${{ env.PACKAGE_NAME }}.spec || {
             echo "RPM build failed, checking issues..."
-            cat ~/rpmbuild/SPECS/apisnip.spec
+            cat ~/rpmbuild/SPECS/${{ env.PACKAGE_NAME }}.spec
             ls -la ~/rpmbuild/SOURCES/
             echo "Contents of source tarball:"
-            tar -tvzf ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz
+            tar -tvzf ~/rpmbuild/SOURCES/${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.tar.gz
             exit 1
           }
           
@@ -266,7 +272,6 @@ jobs:
   create-apk-package:
     name: Create Alpine Linux Package (APK)
     runs-on: ubuntu-latest
-    # Only build for x86_64 as aarch64 is causing issues
     strategy:
       matrix:
         arch: [x86_64]
@@ -299,20 +304,20 @@ jobs:
       - name: Download Linux binary
         uses: robinraju/release-downloader@v1.8
         with:
-          repository: ${{ github.repository }}
+          repository: ${{ env.GITHUB_REPO }}
           tag: "v${{ env.VERSION }}"
-          fileName: "apisnip-linux-${{ matrix.arch }}.tar.gz"
+          fileName: "${{ env.PACKAGE_NAME }}-linux-${{ matrix.arch }}.tar.gz"
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify downloaded file
         run: |
           ls -la ./downloaded/
-          if [ ! -s ./downloaded/apisnip-linux-*.tar.gz ]; then
+          if [ ! -s ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz ]; then
             echo "Error: Downloaded file is empty or does not exist"
             exit 1
           fi
-          file ./downloaded/apisnip-linux-*.tar.gz
+          file ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz
 
       # Create .deb package as a fallback for Alpine Linux
       - name: Create Debian package instead
@@ -320,35 +325,33 @@ jobs:
         run: |
           # Extract the binary
           mkdir -p pkg/usr/bin
-          mkdir -p pkg/usr/share/doc/apisnip
-          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C pkg
+          mkdir -p pkg/usr/share/doc/${{ env.PACKAGE_NAME }}
+          tar -xzf ./downloaded/${{ env.PACKAGE_NAME }}-linux-*.tar.gz -C pkg
           
           # Make sure binary is in the right place
-          if [ -f "pkg/apisnip" ]; then
+          if [ -f "pkg/${{ env.PACKAGE_NAME }}" ]; then
             mkdir -p pkg/usr/bin
-            mv pkg/apisnip pkg/usr/bin/
+            mv pkg/${{ env.PACKAGE_NAME }} pkg/usr/bin/
           fi
           
-          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
-          chmod +x pkg/usr/bin/apisnip
+          cp README.md LICENSE pkg/usr/share/doc/${{ env.PACKAGE_NAME }}/ || true
+          chmod +x pkg/usr/bin/${{ env.PACKAGE_NAME }}
           
           # Create Debian control file
           mkdir -p pkg/DEBIAN
           cat > pkg/DEBIAN/control << EOF
-          Package: apisnip
+          Package: ${{ env.PACKAGE_NAME }}
           Version: ${{ env.VERSION }}
           Section: utils
           Priority: optional
           Architecture: amd64
-          Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
-          Description: A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
-           ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
-           to only the parts you need. It provides a user-friendly terminal interface for
-           selecting specific endpoints and data models.
+          Maintainer: ${{ env.MAINTAINER_NAME }} <${{ env.MAINTAINER_EMAIL }}>
+          Description: ${{ env.PACKAGE_DESCRIPTION }}
+           ${{ env.PACKAGE_LONG_DESCRIPTION }}
           EOF
           
           # Build the package
-          DEB_FILENAME="apisnip-alpine-${{ env.VERSION }}-${{ matrix.arch }}.deb"
+          DEB_FILENAME="${{ env.PACKAGE_NAME }}-alpine-${{ env.VERSION }}-${{ matrix.arch }}.deb"
           dpkg-deb --build pkg "${DEB_FILENAME}"
           echo "DEB_FILENAME=${DEB_FILENAME}" >> $GITHUB_OUTPUT
           
@@ -403,9 +406,9 @@ jobs:
       - name: Download macOS binaries
         uses: robinraju/release-downloader@v1.8
         with:
-          repository: ${{ github.repository }}
+          repository: ${{ env.GITHUB_REPO }}
           tag: "v${{ steps.extract_version.outputs.VERSION }}"
-          fileName: "apisnip-macos-*.tar.gz"
+          fileName: "${{ env.PACKAGE_NAME }}-macos-*.tar.gz"
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -414,30 +417,30 @@ jobs:
         id: create_dmg
         run: |
           # Create app structure
-          mkdir -p ApiSnip.app/Contents/{MacOS,Resources}
+          mkdir -p ${{ env.PACKAGE_NAME }}.app/Contents/{MacOS,Resources}
           
           # Extract x86_64 binary (use arm64 if available)
-          if [ -f "downloaded/apisnip-macos-arm64.tar.gz" ]; then
-            tar -xzf downloaded/apisnip-macos-arm64.tar.gz -C ./
+          if [ -f "downloaded/${{ env.PACKAGE_NAME }}-macos-arm64.tar.gz" ]; then
+            tar -xzf downloaded/${{ env.PACKAGE_NAME }}-macos-arm64.tar.gz -C ./
           else
-            tar -xzf downloaded/apisnip-macos-x86_64.tar.gz -C ./
+            tar -xzf downloaded/${{ env.PACKAGE_NAME }}-macos-x86_64.tar.gz -C ./
           fi
           
           # Copy binary to app bundle
-          mv apisnip ApiSnip.app/Contents/MacOS/
+          mv ${{ env.PACKAGE_NAME }} ${{ env.PACKAGE_NAME }}.app/Contents/MacOS/
           
           # Create Info.plist
-          cat > ApiSnip.app/Contents/Info.plist << EOF
+          cat > ${{ env.PACKAGE_NAME }}.app/Contents/Info.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>CFBundleExecutable</key>
-              <string>apisnip</string>
+              <string>${{ env.PACKAGE_NAME }}</string>
               <key>CFBundleIdentifier</key>
-              <string>com.michielroos.apisnip</string>
+              <string>com.michielroos.${{ env.PACKAGE_NAME }}</string>
               <key>CFBundleName</key>
-              <string>ApiSnip</string>
+              <string>${{ env.PACKAGE_NAME }}</string>
               <key>CFBundleVersion</key>
               <string>${{ steps.extract_version.outputs.VERSION }}</string>
               <key>CFBundleShortVersionString</key>
@@ -447,12 +450,12 @@ jobs:
           EOF
           
           # Create DMG
-          hdiutil create -volname "ApiSnip" -srcfolder ApiSnip.app -ov -format UDZO apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg
+          hdiutil create -volname "${{ env.PACKAGE_NAME }}" -srcfolder ${{ env.PACKAGE_NAME }}.app -ov -format UDZO ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.dmg
           
           # Create checksum
-          shasum -a 256 apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg > apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg.sha256
+          shasum -a 256 ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.dmg > ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.dmg.sha256
           
-          echo "DMG_FILENAME=apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg" >> $GITHUB_OUTPUT
+          echo "DMG_FILENAME=${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.dmg" >> $GITHUB_OUTPUT
 
       # Create Homebrew Formula
       - name: Create Homebrew Formula
@@ -465,52 +468,52 @@ jobs:
           ARM64_SHA=""
           X86_64_SHA=""
           
-          if [ -f "downloaded/apisnip-macos-arm64.tar.gz" ]; then
-            ARM64_SHA=$(shasum -a 256 downloaded/apisnip-macos-arm64.tar.gz | cut -d ' ' -f 1)
+          if [ -f "downloaded/${{ env.PACKAGE_NAME }}-macos-arm64.tar.gz" ]; then
+            ARM64_SHA=$(shasum -a 256 downloaded/${{ env.PACKAGE_NAME }}-macos-arm64.tar.gz | cut -d ' ' -f 1)
           fi
           
-          if [ -f "downloaded/apisnip-macos-x86_64.tar.gz" ]; then
-            X86_64_SHA=$(shasum -a 256 downloaded/apisnip-macos-x86_64.tar.gz | cut -d ' ' -f 1)
+          if [ -f "downloaded/${{ env.PACKAGE_NAME }}-macos-x86_64.tar.gz" ]; then
+            X86_64_SHA=$(shasum -a 256 downloaded/${{ env.PACKAGE_NAME }}-macos-x86_64.tar.gz | cut -d ' ' -f 1)
           fi
           
           # Create the formula file
-          cat > homebrew-formula/apisnip.rb << EOF
-          class Apisnip < Formula
-            desc "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
-            homepage "https://github.com/Tuurlijk/apisnip"
+          cat > homebrew-formula/${{ env.PACKAGE_NAME }}.rb << EOF
+          class $(echo "${{ env.PACKAGE_NAME }}" | perl -pe 's/(?:^|-)(\w)/\U$1/g') < Formula
+            desc "${{ env.PACKAGE_DESCRIPTION }}"
+            homepage "${{ env.PACKAGE_HOMEPAGE }}"
             version "${{ steps.extract_version.outputs.VERSION }}"
-            license "MIT"
+            license "${{ env.PACKAGE_LICENSE }}"
             
             on_macos do
               on_arm do
-                url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-macos-arm64.tar.gz"
+                url "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ steps.extract_version.outputs.VERSION }}/${{ env.PACKAGE_NAME }}-macos-arm64.tar.gz"
                 sha256 "${ARM64_SHA}"
               end
               
               on_intel do
-                url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-macos-x86_64.tar.gz"
+                url "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ steps.extract_version.outputs.VERSION }}/${{ env.PACKAGE_NAME }}-macos-x86_64.tar.gz"
                 sha256 "${X86_64_SHA}"
               end
             end
             
             on_linux do
-              url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-linux-x86_64.tar.gz"
+              url "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ steps.extract_version.outputs.VERSION }}/${{ env.PACKAGE_NAME }}-linux-x86_64.tar.gz"
             end
             
             def install
-              bin.install "apisnip"
+              bin.install "${{ env.PACKAGE_NAME }}"
             end
             
             test do
-              assert_match "ApiSnip ${{ steps.extract_version.outputs.VERSION }}", shell_output("#{bin}/apisnip --version", 2)
+              assert_match "${{ env.PACKAGE_NAME }} ${{ steps.extract_version.outputs.VERSION }}", shell_output("#{bin}/${{ env.PACKAGE_NAME }} --version", 2)
             end
           end
           EOF
           
           # Create a zip of the formula
-          zip -r apisnip-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip homebrew-formula/apisnip.rb
+          zip -r ${{ env.PACKAGE_NAME }}-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip homebrew-formula/${{ env.PACKAGE_NAME }}.rb
           
-          echo "HOMEBREW_FORMULA=apisnip-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip" >> $GITHUB_OUTPUT
+          echo "HOMEBREW_FORMULA=${{ env.PACKAGE_NAME }}-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip" >> $GITHUB_OUTPUT
 
       - name: Upload macOS packages to release
         uses: softprops/action-gh-release@v2
@@ -562,10 +565,10 @@ jobs:
         run: |
           mkdir -p aur-package
           cd aur-package
-          curl -L "https://github.com/${{ github.repository }}/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz" -o "apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz"
+          curl -L "${{ env.PACKAGE_HOMEPAGE }}/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz" -o "${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.tar.gz"
           
           # Calculate SHA256 sum
-          SOURCE_SHA256=$(sha256sum "apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz" | awk '{print $1}')
+          SOURCE_SHA256=$(sha256sum "${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.tar.gz" | awk '{print $1}')
           echo "SOURCE_SHA256=${SOURCE_SHA256}" >> $GITHUB_ENV
 
       - name: Create PKGBUILD
@@ -574,18 +577,18 @@ jobs:
           cd aur-package
           
           cat > PKGBUILD << EOF
-          # Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
+          # Maintainer: ${{ env.MAINTAINER_NAME }} <${{ env.MAINTAINER_EMAIL }}>
           
-          pkgname=apisnip
+          pkgname=${{ env.PACKAGE_NAME }}
           pkgver=${{ steps.extract_version.outputs.VERSION }}
           pkgrel=1
-          pkgdesc="A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
+          pkgdesc="${{ env.PACKAGE_DESCRIPTION }}"
           arch=('x86_64' 'aarch64')
-          url="https://github.com/Tuurlijk/apisnip"
-          license=('MIT')
+          url="${{ env.PACKAGE_HOMEPAGE }}"
+          license=('${{ env.PACKAGE_LICENSE }}')
           depends=()
           makedepends=('cargo')
-          source=("\${pkgname}-\${pkgver}.tar.gz::https://github.com/Tuurlijk/apisnip/archive/refs/tags/v\${pkgver}.tar.gz")
+          source=("\${pkgname}-\${pkgver}.tar.gz::${{ env.PACKAGE_HOMEPAGE }}/archive/refs/tags/v\${pkgver}.tar.gz")
           sha256sums=('${SOURCE_SHA256}')
           
           build() {
@@ -602,23 +605,23 @@ jobs:
           EOF
           
           cat > .SRCINFO << EOF
-          pkgbase = apisnip
-          	pkgdesc = A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+          pkgbase = ${{ env.PACKAGE_NAME }}
+          	pkgdesc = ${{ env.PACKAGE_DESCRIPTION }}
           	pkgver = ${{ steps.extract_version.outputs.VERSION }}
           	pkgrel = 1
-          	url = https://github.com/Tuurlijk/apisnip
+          	url = ${{ env.PACKAGE_HOMEPAGE }}
           	arch = x86_64
           	arch = aarch64
-          	license = MIT
+          	license = ${{ env.PACKAGE_LICENSE }}
           	makedepends = cargo
-          	source = apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz::https://github.com/Tuurlijk/apisnip/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz
+          	source = ${{ env.PACKAGE_NAME }}-${{ steps.extract_version.outputs.VERSION }}.tar.gz::${{ env.PACKAGE_HOMEPAGE }}/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz
           	sha256sums = ${SOURCE_SHA256}
           
-          pkgname = apisnip
+          pkgname = ${{ env.PACKAGE_NAME }}
           EOF
           
-          tar -czf apisnip-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz PKGBUILD .SRCINFO
-          echo "AUR_PACKAGE=apisnip-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz" >> $GITHUB_OUTPUT
+          tar -czf ${{ env.PACKAGE_NAME }}-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz PKGBUILD .SRCINFO
+          echo "AUR_PACKAGE=${{ env.PACKAGE_NAME }}-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz" >> $GITHUB_OUTPUT
 
       - name: Upload AUR package to release
         uses: softprops/action-gh-release@v2
@@ -627,10 +630,6 @@ jobs:
           tag_name: v${{ steps.extract_version.outputs.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      # Note: To actually publish to AUR, you would need to set up SSH keys
-      # and use git to push to the AUR. This is not implemented here as it
-      # requires AUR account credentials. 
 
   # Modify the organize-release-assets job to add more diagnostics
   organize-release-assets:
@@ -745,19 +744,19 @@ jobs:
           ### Linux Binaries
           | Package | SHA256 |
           |---------|--------|
-          | [apisnip-linux-x86_64.tar.gz](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          | [${{ env.PACKAGE_NAME }}-linux-x86_64.tar.gz](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
           
           ### Windows Binaries
           | Package | SHA256 |
           |---------|--------|
-          | [apisnip-windows-x86_64.zip](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          | [${{ env.PACKAGE_NAME }}-windows-x86_64.zip](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
           
           ## Package Downloads
           
           ### Debian/Ubuntu Packages (.deb)
           | Package | SHA256 |
           |---------|--------|
-          | [apisnip_1.0.0_amd64.deb](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
+          | [${{ env.PACKAGE_NAME }}_1.0.0_amd64.deb](https://example.com/test) | [SHA256](https://example.com/test.sha256) |
           EOF
           
           echo "Created test assets file:"
@@ -834,9 +833,9 @@ jobs:
             cat real_assets.md >> combined_body.md
           else
             echo "Creating a new body with version and real content"
-            echo "## ApiSnip v${VERSION}" > combined_body.md
+            echo "## ${{ env.PACKAGE_NAME }} v${VERSION}" > combined_body.md
             echo "" >> combined_body.md
-            echo "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️" >> combined_body.md
+            echo "${{ env.PACKAGE_DESCRIPTION }} ✂️" >> combined_body.md
             echo "" >> combined_body.md
             cat real_assets.md >> combined_body.md
           fi
@@ -937,10 +936,10 @@ jobs:
         run: |
           mkdir -p nix-package
           cd nix-package
-          curl -L "https://github.com/${{ github.repository }}/archive/refs/tags/v${{ env.VERSION }}.tar.gz" -o "apisnip-${{ env.VERSION }}.tar.gz"
+          curl -L "https://github.com/${{ github.repository }}/archive/refs/tags/v${{ env.VERSION }}.tar.gz" -o "${{ env.PACKAGE_NAME }}-${{ env.VERSION }}.tar.gz"
           
           # Calculate SHA256 sum
-          SOURCE_SHA256=$(sha256sum "apisnip-${{ env.VERSION }}.tar.gz" | awk '{print $1}')
+          SOURCE_SHA256=$(sha256sum "${{ env.PACKAGE_NAME }}-${{ env.VERSION }}.tar.gz" | awk '{print $1}')
           echo "SOURCE_SHA256=${SOURCE_SHA256}" >> $GITHUB_ENV
 
       - name: Create Nix package file
@@ -953,12 +952,12 @@ jobs:
           { pkgs ? import <nixpkgs> {} }:
           
           pkgs.rustPlatform.buildRustPackage rec {
-            pname = "apisnip";
+            pname = "${{ env.PACKAGE_NAME }}";
             version = "${{ env.VERSION }}";
           
             src = pkgs.fetchFromGitHub {
               owner = "Tuurlijk";
-              repo = "apisnip";
+              repo = "${{ env.PACKAGE_NAME }}";
               rev = "v\${version}";
               sha256 = "${{ env.SOURCE_SHA256 }}";
             };
@@ -966,8 +965,8 @@ jobs:
             cargoSha256 = "${{ env.SOURCE_SHA256 }}";
           
             meta = with pkgs.lib; {
-              description = "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size";
-              homepage = "https://github.com/Tuurlijk/apisnip";
+              description = "${{ env.PACKAGE_DESCRIPTION }}";
+              homepage = "${{ env.PACKAGE_HOMEPAGE }}";
               license = licenses.mit;
               maintainers = [ maintainers.tuurlijk ];
               platforms = platforms.all;
@@ -977,16 +976,16 @@ jobs:
           
           # Create a README for the nix package
           cat > README.md << EOF
-          # Nix Package for ApiSnip
+          # Nix Package for ${{ env.PACKAGE_NAME }}
           
-          This is a Nix package definition for ApiSnip, a terminal user interface (TUI) tool for trimming OpenAPI specifications.
+          This is a Nix package definition for ${{ env.PACKAGE_NAME }}, ${{ env.PACKAGE_DESCRIPTION }}.
           
           ## Installation
           
           ### Temporary installation
           
           \`\`\`
-          nix-shell -p 'import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {}'
+          nix-shell -p 'import (builtins.fetchTarball "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ env.VERSION }}/${{ env.PACKAGE_NAME }}-nix-${{ env.VERSION }}.tar.gz") {}'
           \`\`\`
           
           ### Permanent installation
@@ -995,10 +994,10 @@ jobs:
           
           \`\`\`nix
           let
-            apisnip = import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {};
+            ${{ env.PACKAGE_NAME }} = import (builtins.fetchTarball "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ env.VERSION }}/${{ env.PACKAGE_NAME }}-nix-${{ env.VERSION }}.tar.gz") {};
           in
           {
-            environment.systemPackages = [ apisnip ];
+            environment.systemPackages = [ ${{ env.PACKAGE_NAME }} ];
           }
           \`\`\`
           
@@ -1006,16 +1005,16 @@ jobs:
           
           \`\`\`nix
           let
-            apisnip = import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {};
+            ${{ env.PACKAGE_NAME }} = import (builtins.fetchTarball "${{ env.PACKAGE_HOMEPAGE }}/releases/download/v${{ env.VERSION }}/${{ env.PACKAGE_NAME }}-nix-${{ env.VERSION }}.tar.gz") {};
           in
           {
-            home.packages = [ apisnip ];
+            home.packages = [ ${{ env.PACKAGE_NAME }} ];
           }
           \`\`\`
           EOF
           
           # Create the tarball
-          NIX_FILENAME="apisnip-nix-${{ env.VERSION }}.tar.gz"
+          NIX_FILENAME="${{ env.PACKAGE_NAME }}-nix-${{ env.VERSION }}.tar.gz"
           tar -czf "$NIX_FILENAME" default.nix README.md
           echo "NIX_FILENAME=$NIX_FILENAME" >> $GITHUB_OUTPUT
           
