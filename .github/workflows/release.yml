@@ -11,7 +11,7 @@ on:
   #     - 'v*'
   # pull_request:
   release:
-    types: [created, published]
+    types: [created]
 
 env:
   CARGO_TERM_COLOR: always
