@@ -763,21 +763,82 @@ jobs:
           echo "Created test assets file:"
           cat test_assets.md
 
+      - name: Create Real Asset Categories
+        id: create_real_categories
+        run: |
+          # Process actual release assets
+          # Create function to generate category sections
+          generate_category() {
+            local category=$1
+            local pattern=$2
+            local title=$3
+            
+            echo "### $title"
+            echo ""
+            
+            # Filter assets matching the pattern and exclude checksums
+            matching_assets=$(grep -i "$pattern" assets.txt | grep -v "\.sha256$" | sort)
+            if [ -z "$matching_assets" ]; then
+              echo "No $category packages available."
+            else
+              echo "| Package | SHA256 |"
+              echo "|---------|--------|"
+              while read -r line; do
+                if [ -n "$line" ]; then
+                  name=$(echo "$line" | awk '{print $1}')
+                  url=$(echo "$line" | awk '{print $2}')
+                  # Look for corresponding SHA256 file
+                  sha_line=$(grep "${name}\.sha256" assets.txt || echo "")
+                  if [ -n "$sha_line" ]; then
+                    sha_url=$(echo "$sha_line" | awk '{print $2}')
+                    echo "| [$name]($url) | [SHA256]($sha_url) |"
+                  else
+                    echo "| [$name]($url) | N/A |"
+                  fi
+                fi
+              done <<< "$matching_assets"
+            fi
+            echo ""
+          }
+          
+          # Generate real assets markdown
+          {
+            echo "## Binary Downloads"
+            echo ""
+            generate_category "Linux" "linux" "Linux Binaries"
+            generate_category "Windows" "windows" "Windows Binaries"
+            generate_category "macOS" "macos" "macOS Binaries"
+            generate_category "FreeBSD" "freebsd" "FreeBSD Binaries"
+            generate_category "NetBSD" "netbsd" "NetBSD Binaries"
+            
+            echo "## Package Downloads"
+            echo ""
+            generate_category "Debian" "_amd64\.deb\|_arm64\.deb\|_i386\.deb" "Debian/Ubuntu Packages (.deb)"
+            generate_category "RPM" "\.rpm" "Red Hat/Fedora/SUSE Packages (.rpm)"
+            generate_category "AUR" "aur" "Arch Linux Package (AUR)"
+            generate_category "Homebrew" "homebrew" "macOS Homebrew Formula"
+            generate_category "DMG" "\.dmg" "macOS Disk Image (.dmg)"
+            generate_category "Nix" "nix" "Nix Packages"
+          } > real_assets.md
+          
+          echo "Created real assets content (first 20 lines):"
+          head -20 real_assets.md
+
       - name: Combine Content (Debug Step 5)
         id: combine_content
         run: |
           # Create a simplified combined body
           if [ -n "$EXISTING_BODY" ]; then
-            echo "Using existing body and appending test content"
+            echo "Using existing body and appending real content"
             echo "$EXISTING_BODY" > combined_body.md
-            cat test_assets.md >> combined_body.md
+            cat real_assets.md >> combined_body.md
           else
-            echo "Creating a new body with version and test content"
+            echo "Creating a new body with version and real content"
             echo "## ApiSnip v${VERSION}" > combined_body.md
             echo "" >> combined_body.md
             echo "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️" >> combined_body.md
             echo "" >> combined_body.md
-            cat test_assets.md >> combined_body.md
+            cat real_assets.md >> combined_body.md
           fi
           
           echo "First 20 lines of combined body:"
@@ -795,10 +856,9 @@ jobs:
       - name: Update Release Description (Debug Step 6)
         run: |
           RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
-          ESCAPED_CONTENT=$(cat escaped_content.json)
           
-          echo "Using simplified JSON payload for testing"
-          echo "{\"body\": \"Test update from GitHub Actions\"}" > test_payload.json
+          echo "Using minimal test update to verify API access"
+          echo "{\"body\": \"Test update from GitHub Actions - preparing real content...\"}" > test_payload.json
           
           echo "Sending test update to release ID: $RELEASE_ID"
           HTTP_STATUS=$(curl -s -o update_response.txt -w "%{http_code}" \
@@ -820,23 +880,31 @@ jobs:
             exit 1
           fi
           
-      - name: Final Update (Debug Step 7)
-        if: false # Skip this step for now while debugging
+      - name: Final Update With Assets
+        id: final_update
         run: |
           RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
           ESCAPED_CONTENT=$(cat escaped_content.json)
           
-          echo "Sending final update to release ID: $RELEASE_ID"
-          curl -s -o final_response.txt \
+          echo "Sending final update with full asset tables to release ID: $RELEASE_ID"
+          HTTP_STATUS=$(curl -s -o final_response.txt -w "%{http_code}" \
             -X PATCH \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
-            -d "{\"body\": ${ESCAPED_CONTENT}}"
+            -d "{\"body\": ${ESCAPED_CONTENT}}")
           
-          echo "Response:"
-          cat final_response.txt
+          echo "Final update HTTP Status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ Release description successfully updated with all assets"
+          else
+            echo "❌ Final update failed"
+            echo "Response (first 500 chars):"
+            cat final_response.txt | head -c 500
+            exit 1
+          fi
 
   # Add new Nix Package job
   create-nix-package:
