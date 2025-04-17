@@ -118,7 +118,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [x86_64, aarch64, i686]
+        arch: [x86_64, aarch64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -163,6 +163,15 @@ jobs:
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify downloaded file
+        run: |
+          ls -la ./downloaded/
+          if [ ! -s ./downloaded/apisnip-linux-*.tar.gz ]; then
+            echo "Error: Downloaded file is empty or does not exist"
+            exit 1
+          fi
+          file ./downloaded/apisnip-linux-*.tar.gz
+
       - name: Setup RPM build environment
         run: |
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
@@ -191,6 +200,7 @@ jobs:
           URL:            https://github.com/Tuurlijk/apisnip
           Source0:        %{name}-%{version}.tar.gz
           
+          # Specify architecture explicitly
           BuildArch:      ${{ matrix.arch }}
           
           %description
@@ -218,10 +228,22 @@ jobs:
       - name: Build RPM package
         id: build_rpm
         run: |
-          rpmbuild -ba ~/rpmbuild/SPECS/apisnip.spec
+          rpmbuild -ba ~/rpmbuild/SPECS/apisnip.spec || {
+            echo "RPM build failed, checking issues..."
+            cat ~/rpmbuild/SPECS/apisnip.spec
+            ls -la ~/rpmbuild/SOURCES/
+            echo "Contents of source tarball:"
+            tar -tvzf ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz
+            exit 1
+          }
           
           # Find the built RPM
           RPM_PATH=$(find ~/rpmbuild/RPMS -name "*.rpm" | head -1)
+          if [ -z "$RPM_PATH" ]; then
+            echo "No RPM package found in the build directory"
+            exit 1
+          fi
+          
           RPM_FILENAME=$(basename "$RPM_PATH")
           cp "$RPM_PATH" .
           
@@ -251,7 +273,7 @@ jobs:
     steps:
       - name: Install build tools
         run: |
-          apk add --no-cache alpine-sdk sudo tar curl jq bash
+          apk add --no-cache alpine-sdk sudo tar curl jq bash file
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -273,7 +295,10 @@ jobs:
             VERSION=$(curl -s ${GITHUB_API} | jq -r '.tag_name' | sed 's/^v//')
             echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           fi
-          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+          VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)
+          echo "Using version: $VERSION"
+          # Export as environment variable for easier use in subsequent steps
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Download Linux binary
         run: |
@@ -283,7 +308,48 @@ jobs:
             ARCH_NAME="arm64"
           fi
           
-          curl -L "https://github.com/${GITHUB_REPOSITORY}/releases/download/v$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)/apisnip-linux-${ARCH_NAME}.tar.gz" -o downloaded/apisnip-linux.tar.gz
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/apisnip-linux-${ARCH_NAME}.tar.gz"
+          echo "Downloading from: $DOWNLOAD_URL"
+          
+          curl -L -o downloaded/apisnip-linux.tar.gz "$DOWNLOAD_URL"
+          
+          # Verify the download
+          ls -la downloaded/
+          file downloaded/apisnip-linux.tar.gz
+
+      - name: Extract binary manually
+        run: |
+          mkdir -p pkg/usr/bin
+          cd pkg
+          
+          # Extract the tar file directly
+          BINARY_PATH="$(pwd)/usr/bin/apisnip"
+          mkdir -p usr/bin
+          
+          cd ..
+          tar -xvf downloaded/apisnip-linux.tar.gz -C pkg
+          
+          if [ -f "pkg/apisnip" ]; then
+            # If the binary is directly at the root, move it to the right location
+            mkdir -p pkg/usr/bin
+            mv pkg/apisnip pkg/usr/bin/
+          fi
+          
+          # Verify extraction
+          find pkg -type f | sort
+          
+          # Copy binary to a known location for build step
+          cp pkg/usr/bin/apisnip ./apisnip || { 
+            echo "Binary not found at pkg/usr/bin/apisnip, checking other locations";
+            find pkg -name "apisnip" -type f -exec cp {} ./apisnip \;
+          }
+          
+          if [ ! -f "./apisnip" ]; then
+            echo "Failed to locate the apisnip binary after extraction"
+            exit 1
+          fi
+          
+          chmod +x ./apisnip
 
       - name: Setup APK build environment
         run: |
@@ -300,7 +366,7 @@ jobs:
           cat > APKBUILD << EOF
           # Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
           pkgname=apisnip
-          pkgver=${{ steps.extract_version.outputs.VERSION }}
+          pkgver=${VERSION}
           pkgrel=0
           pkgdesc="A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
           url="https://github.com/Tuurlijk/apisnip"
@@ -321,14 +387,6 @@ jobs:
           }
           EOF
 
-      - name: Extract binary
-        run: |
-          mkdir -p pkg/usr/bin
-          mkdir -p pkg/usr/share/doc/apisnip
-          tar -xzf downloaded/apisnip-linux.tar.gz -C ./pkg
-          cp pkg/apisnip ~/apkbuild/
-          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
-
       - name: Build APK package
         id: build_apk
         run: |
@@ -339,6 +397,14 @@ jobs:
           
           # Find the built APK
           APK_PATH=$(find /home/$(whoami)/packages -name "*.apk" | grep apisnip | head -1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK package found in the build directory"
+            ls -la /home/$(whoami)/packages
+            abuild -v # Show more verbose output about what might have gone wrong
+            exit 1
+          fi
+          
           APK_FILENAME=$(basename "$APK_PATH")
           
           # Copy the package
@@ -356,7 +422,7 @@ jobs:
           files: |
             ${{ steps.build_apk.outputs.APK_FILENAME }}
             ${{ steps.build_apk.outputs.APK_FILENAME }}.sha256
-          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+          tag_name: v${{ env.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -626,3 +692,162 @@ jobs:
       # Note: To actually publish to AUR, you would need to set up SSH keys
       # and use git to push to the AUR. This is not implemented here as it
       # requires AUR account credentials. 
+
+  # Add a final job to organize release assets in the description
+  organize-release-assets:
+    name: Organize Release Assets
+    needs: [create-debian-package, create-rpm-package, create-apk-package, create-macos-package, create-aur-package]
+    runs-on: ubuntu-latest
+    if: always() # Run even if some of the previous jobs failed
+    steps:
+      - name: Get Release Info
+        id: get_release
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            RESPONSE='${{ steps.get_release.outputs.data }}'
+            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+            VERSION=${TAG_NAME#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+
+      - name: Get All Assets
+        id: get_assets
+        run: |
+          RELEASE_TAG="v${{ steps.extract_version.outputs.VERSION }}"
+          ASSETS=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" \
+            | jq -r '.assets[] | "\(.name) \(.browser_download_url)"')
+          
+          echo "ASSETS<<EOF" >> $GITHUB_ENV
+          echo "$ASSETS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Get Existing Release Info
+        id: get_existing_release
+        run: |
+          RELEASE_TAG="v${{ steps.extract_version.outputs.VERSION }}"
+          RELEASE_DATA=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")
+          
+          # Extract the current release body
+          EXISTING_BODY=$(echo "$RELEASE_DATA" | jq -r '.body // ""')
+          
+          # Check if body already contains our asset tables (to avoid duplicates)
+          if echo "$EXISTING_BODY" | grep -q "## Binary Downloads"; then
+            # If our sections already exist, just preserve the original body
+            echo "EXISTING_BODY<<EOF" >> $GITHUB_ENV
+            echo "$EXISTING_BODY" >> $GITHUB_ENV 
+            echo "EOF" >> $GITHUB_ENV
+            echo "CONTAINS_ASSETS=true" >> $GITHUB_OUTPUT
+          else
+            # If our sections don't exist, we'll append them
+            echo "EXISTING_BODY<<EOF" >> $GITHUB_ENV
+            echo "$EXISTING_BODY" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            echo "CONTAINS_ASSETS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Organize Assets by Category
+        id: organize_assets
+        if: steps.get_existing_release.outputs.CONTAINS_ASSETS != 'true'
+        run: |
+          # Function to create a category section with assets
+          create_category() {
+            local category=$1
+            local pattern=$2
+            local title=$3
+            
+            echo -e "### $title\n"
+            
+            # Filter assets matching the pattern and create markdown links
+            matching_assets=$(echo "$ASSETS" | grep -i "$pattern" | grep -v "\.sha256$" | sort)
+            if [ -z "$matching_assets" ]; then
+              echo "No $category packages available."
+            else
+              echo "| Package | SHA256 |"
+              echo "|---------|--------|"
+              echo "$matching_assets" | while read -r line; do
+                name=$(echo "$line" | awk '{print $1}')
+                url=$(echo "$line" | awk '{print $2}')
+                sha_line=$(echo "$ASSETS" | grep "${name}\.sha256")
+                if [ -n "$sha_line" ]; then
+                  sha_url=$(echo "$sha_line" | awk '{print $2}')
+                  echo "| [$name]($url) | [SHA256]($sha_url) |"
+                else
+                  echo "| [$name]($url) | N/A |"
+                fi
+              done
+            fi
+            echo ""
+          }
+          
+          # Generate description file for the assets
+          cat > assets_section.md << EOF
+
+          ## Binary Downloads
+          
+          $(create_category "Linux" "linux" "Linux Binaries")
+          $(create_category "Windows" "windows" "Windows Binaries")
+          $(create_category "macOS" "macos" "macOS Binaries")
+          $(create_category "FreeBSD" "freebsd" "FreeBSD Binaries")
+          $(create_category "NetBSD" "netbsd" "NetBSD Binaries")
+          
+          ## Package Downloads
+          
+          $(create_category "Debian" "_amd64\.deb\|_arm64\.deb\|_i386\.deb" "Debian/Ubuntu Packages (.deb)")
+          $(create_category "RPM" "\.rpm" "Red Hat/Fedora/SUSE Packages (.rpm)")
+          $(create_category "Alpine" "\.apk" "Alpine Linux Packages (.apk)")
+          $(create_category "AUR" "aur" "Arch Linux Package (AUR)")
+          $(create_category "Homebrew" "homebrew" "macOS Homebrew Formula")
+          $(create_category "DMG" "\.dmg" "macOS Disk Image (.dmg)")
+          EOF
+          
+          ASSETS_SECTION=$(cat assets_section.md)
+          echo "assets_section<<EOF" >> $GITHUB_OUTPUT
+          echo "$ASSETS_SECTION" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Combine existing body with asset tables
+          if [ -n "$EXISTING_BODY" ]; then
+            COMBINED_BODY="${EXISTING_BODY}${ASSETS_SECTION}"
+          else
+            COMBINED_BODY=$'## ApiSnip v${{ steps.extract_version.outputs.VERSION }}\n\nA terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️${ASSETS_SECTION}'
+          fi
+          
+          echo "combined_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMBINED_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update Release Description
+        if: steps.get_existing_release.outputs.CONTAINS_ASSETS != 'true'
+        uses: octokit/request-action@v2.x
+        with:
+          route: PATCH /repos/${{ github.repository }}/releases/tags/v${{ steps.extract_version.outputs.VERSION }}
+          body: ${{ steps.organize_assets.outputs.combined_body }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log Status
+        run: |
+          if [ "${{ steps.get_existing_release.outputs.CONTAINS_ASSETS }}" == "true" ]; then
+            echo "Release description already contains asset tables. No changes made."
+          else
+            echo "Release description updated with organized asset tables."
+          fi 
