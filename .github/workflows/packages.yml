@@ -799,9 +799,11 @@ jobs:
           if [ -n "$EXISTING_BODY" ]; then
             COMBINED_BODY="${EXISTING_BODY}$(cat assets_section.md)"
           else
-            COMBINED_BODY="## ApiSnip v${VERSION}
-
-            A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️$(cat assets_section.md)"
+            COMBINED_BODY="## ApiSnip v${VERSION}"
+            COMBINED_BODY="${COMBINED_BODY}\n\n"
+            COMBINED_BODY="${COMBINED_BODY}A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️"
+            COMBINED_BODY="${COMBINED_BODY}\n\n"
+            COMBINED_BODY="${COMBINED_BODY}$(cat assets_section.md)"
           fi
           
           echo "$COMBINED_BODY" > combined_body.md
