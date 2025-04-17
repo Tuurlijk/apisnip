@@ -4,12 +4,12 @@ permissions:
   contents: write
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  pull_request:
+  # push:
+  #   branches:
+  #     - main
+  #   tags:
+  #     - 'v*'
+  # pull_request:
   release:
     types: [created, published]
 
