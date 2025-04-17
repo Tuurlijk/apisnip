@@ -1,0 +1,608 @@
+name: Create Platform Packages
+
+permissions:
+  contents: write
+
+on:
+  # Triggered after a release is created
+  release:
+    types: [created]
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to use for packaging (without v prefix)'
+        required: true
+        default: ''
+
+jobs:
+  create-debian-package:
+    name: Create Debian Package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64, i386]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest release
+        id: get_release
+        if: github.event.inputs.version == ''
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $VERSION"
+
+      - name: Download Linux binary
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: ${{ github.repository }}
+          tag: "v${{ steps.extract_version.outputs.VERSION }}"
+          fileName: "apisnip-linux-${{ matrix.arch == 'amd64' && 'x86_64' || (matrix.arch == 'i386' && 'i686' || matrix.arch) }}.tar.gz"
+          out-file-path: ./downloaded
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binary
+        run: |
+          mkdir -p pkg/usr/bin
+          mkdir -p pkg/usr/share/doc/apisnip
+          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C ./pkg/usr/bin apisnip
+          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
+          chmod +x pkg/usr/bin/apisnip
+
+      - name: Create Debian package
+        id: create_deb
+        run: |
+          # Map GitHub Action arch to Debian arch
+          DEBIAN_ARCH="${{ matrix.arch }}"
+          if [ "${{ matrix.arch }}" = "i386" ]; then
+            DEBIAN_ARCH="i386"
+          fi
+          
+          # Create Debian control file
+          mkdir -p pkg/DEBIAN
+          cat > pkg/DEBIAN/control << EOF
+          Package: apisnip
+          Version: ${{ steps.extract_version.outputs.VERSION }}
+          Section: utils
+          Priority: optional
+          Architecture: ${DEBIAN_ARCH}
+          Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
+          Description: A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+           ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
+           to only the parts you need. It provides a user-friendly terminal interface for
+           selecting specific endpoints and data models.
+          EOF
+          
+          # Build the package
+          DEB_FILENAME="apisnip_${{ steps.extract_version.outputs.VERSION }}_${DEBIAN_ARCH}.deb"
+          dpkg-deb --build pkg "${DEB_FILENAME}"
+          echo "DEB_FILENAME=${DEB_FILENAME}" >> $GITHUB_OUTPUT
+          
+          # Create checksum
+          sha256sum "${DEB_FILENAME}" > "${DEB_FILENAME}.sha256"
+
+      - name: Upload Debian package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.create_deb.outputs.DEB_FILENAME }}
+            ${{ steps.create_deb.outputs.DEB_FILENAME }}.sha256
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-rpm-package:
+    name: Create RPM Package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64, i686]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Get latest release
+        id: get_release
+        if: github.event.inputs.version == ''
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $VERSION"
+          
+      - name: Install RPM build tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Download Linux binary
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: ${{ github.repository }}
+          tag: "v${{ steps.extract_version.outputs.VERSION }}"
+          fileName: "apisnip-linux-${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}.tar.gz"
+          out-file-path: ./downloaded
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup RPM build environment
+        run: |
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}
+          
+          # Extract binary
+          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin
+          mkdir -p ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/apisnip
+          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin apisnip
+          cp README.md LICENSE ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/share/doc/apisnip/ || true
+          chmod +x ~/rpmbuild/SOURCES/apisnip-${{ steps.extract_version.outputs.VERSION }}/usr/bin/apisnip
+          
+          # Create source tarball
+          cd ~/rpmbuild/SOURCES
+          tar -czf apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz apisnip-${{ steps.extract_version.outputs.VERSION }}
+
+      - name: Create spec file
+        run: |
+          cat > ~/rpmbuild/SPECS/apisnip.spec << EOF
+          Name:           apisnip
+          Version:        ${{ steps.extract_version.outputs.VERSION }}
+          Release:        1%{?dist}
+          Summary:        A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+          
+          License:        MIT
+          URL:            https://github.com/Tuurlijk/apisnip
+          Source0:        %{name}-%{version}.tar.gz
+          
+          BuildArch:      ${{ matrix.arch }}
+          
+          %description
+          ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
+          to only the parts you need. It provides a user-friendly terminal interface for
+          selecting specific endpoints and data models.
+          
+          %prep
+          %setup -q
+          
+          %install
+          mkdir -p %{buildroot}
+          cp -a * %{buildroot}
+          
+          %files
+          %{_bindir}/apisnip
+          %doc %{_docdir}/apisnip/README.md
+          %license %{_docdir}/apisnip/LICENSE
+          
+          %changelog
+          * $(date '+%a %b %d %Y') GitHub Action <apisnip.zumble.frap@michielroos.com> - ${{ steps.extract_version.outputs.VERSION }}-1
+          - Automated package build
+          EOF
+
+      - name: Build RPM package
+        id: build_rpm
+        run: |
+          rpmbuild -ba ~/rpmbuild/SPECS/apisnip.spec
+          
+          # Find the built RPM
+          RPM_PATH=$(find ~/rpmbuild/RPMS -name "*.rpm" | head -1)
+          RPM_FILENAME=$(basename "$RPM_PATH")
+          cp "$RPM_PATH" .
+          
+          # Create checksum
+          sha256sum "${RPM_FILENAME}" > "${RPM_FILENAME}.sha256"
+          
+          echo "RPM_FILENAME=${RPM_FILENAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload RPM package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build_rpm.outputs.RPM_FILENAME }}
+            ${{ steps.build_rpm.outputs.RPM_FILENAME }}.sha256
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-apk-package:
+    name: Create Alpine Linux Package (APK)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install build tools
+        run: |
+          apk add --no-cache alpine-sdk sudo tar curl jq bash
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Get latest release
+        id: get_release
+        if: ${{ github.event.inputs.version == '' }}
+        run: |
+          REPO="${GITHUB_REPOSITORY}"
+          VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | jq -r '.tag_name')
+          VERSION=${VERSION#v}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Using version from latest release: ${VERSION}"
+        
+      - name: Set version from input
+        id: set_version
+        if: ${{ github.event.inputs.version != '' }}
+        run: |
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "Using version from input: ${{ github.event.inputs.version }}"
+      
+      - name: Set final version
+        id: extract_version
+        run: |
+          if [ -n "${{ steps.set_version.outputs.VERSION }}" ]; then
+            echo "VERSION=${{ steps.set_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${{ steps.get_release.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          fi
+          echo "Final version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+
+      - name: Download Linux binary
+        run: |
+          mkdir -p downloaded
+          ARCH_NAME="${{ matrix.arch }}"
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            ARCH_NAME="arm64"
+          fi
+          
+          curl -L "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-linux-${ARCH_NAME}.tar.gz" -o downloaded/apisnip-linux.tar.gz
+
+      - name: Setup APK build environment
+        run: |
+          # Create build directories
+          mkdir -p ~/apkbuild/{src,pkg,keys}
+          
+          # Generate keys for signing packages
+          abuild-keygen -a -n -q
+          
+          # Set up APKBUILD file
+          mkdir -p ~/apkbuild/src/apisnip
+          cd ~/apkbuild/src/apisnip
+          
+          cat > APKBUILD << EOF
+          # Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
+          pkgname=apisnip
+          pkgver=${{ steps.extract_version.outputs.VERSION }}
+          pkgrel=0
+          pkgdesc="A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
+          url="https://github.com/Tuurlijk/apisnip"
+          arch="${{ matrix.arch }}"
+          license="MIT"
+          depends=""
+          makedepends=""
+          install=""
+          subpackages=""
+          source=""
+          
+          package() {
+            mkdir -p "\$pkgdir/usr/bin"
+            mkdir -p "\$pkgdir/usr/share/doc/apisnip"
+            cp \$startdir/../../apisnip "\$pkgdir/usr/bin/"
+            chmod +x "\$pkgdir/usr/bin/apisnip"
+            cp \$startdir/../../../README.md \$startdir/../../../LICENSE "\$pkgdir/usr/share/doc/apisnip/" || true
+          }
+          EOF
+
+      - name: Extract binary
+        run: |
+          mkdir -p pkg/usr/bin
+          mkdir -p pkg/usr/share/doc/apisnip
+          tar -xzf downloaded/apisnip-linux.tar.gz -C ./pkg
+          cp pkg/apisnip ~/apkbuild/
+          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
+
+      - name: Build APK package
+        id: build_apk
+        run: |
+          cd ~/apkbuild/src/apisnip
+          
+          # Build the package
+          abuild -F
+          
+          # Find the built APK
+          APK_PATH=$(find /home/$(whoami)/packages -name "*.apk" | grep apisnip | head -1)
+          APK_FILENAME=$(basename "$APK_PATH")
+          
+          # Copy the package
+          cp "$APK_PATH" /github/workspace/
+          
+          # Create checksum
+          cd /github/workspace
+          sha256sum "${APK_FILENAME}" > "${APK_FILENAME}.sha256"
+          
+          echo "APK_FILENAME=${APK_FILENAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload APK package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build_apk.outputs.APK_FILENAME }}
+            ${{ steps.build_apk.outputs.APK_FILENAME }}.sha256
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-macos-package:
+    name: Create macOS Package
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Get latest release
+        id: get_release
+        if: github.event.inputs.version == ''
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $VERSION"
+
+      - name: Download macOS binaries
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: ${{ github.repository }}
+          tag: "v${{ steps.extract_version.outputs.VERSION }}"
+          fileName: "apisnip-macos-*.tar.gz"
+          out-file-path: ./downloaded
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Create DMG package
+      - name: Create macOS DMG package
+        id: create_dmg
+        run: |
+          # Create app structure
+          mkdir -p ApiSnip.app/Contents/{MacOS,Resources}
+          
+          # Extract x86_64 binary (use arm64 if available)
+          if [ -f "downloaded/apisnip-macos-arm64.tar.gz" ]; then
+            tar -xzf downloaded/apisnip-macos-arm64.tar.gz -C ./
+          else
+            tar -xzf downloaded/apisnip-macos-x86_64.tar.gz -C ./
+          fi
+          
+          # Copy binary to app bundle
+          mv apisnip ApiSnip.app/Contents/MacOS/
+          
+          # Create Info.plist
+          cat > ApiSnip.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>apisnip</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.michielroos.apisnip</string>
+              <key>CFBundleName</key>
+              <string>ApiSnip</string>
+              <key>CFBundleVersion</key>
+              <string>${{ steps.extract_version.outputs.VERSION }}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ steps.extract_version.outputs.VERSION }}</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Create DMG
+          hdiutil create -volname "ApiSnip" -srcfolder ApiSnip.app -ov -format UDZO apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg
+          
+          # Create checksum
+          shasum -a 256 apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg > apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg.sha256
+          
+          echo "DMG_FILENAME=apisnip-${{ steps.extract_version.outputs.VERSION }}.dmg" >> $GITHUB_OUTPUT
+
+      # Create Homebrew Formula
+      - name: Create Homebrew Formula
+        id: create_homebrew
+        run: |
+          # Create formula directory
+          mkdir -p homebrew-formula
+          
+          # Calculate SHA for macOS binaries
+          ARM64_SHA=""
+          X86_64_SHA=""
+          
+          if [ -f "downloaded/apisnip-macos-arm64.tar.gz" ]; then
+            ARM64_SHA=$(shasum -a 256 downloaded/apisnip-macos-arm64.tar.gz | cut -d ' ' -f 1)
+          fi
+          
+          if [ -f "downloaded/apisnip-macos-x86_64.tar.gz" ]; then
+            X86_64_SHA=$(shasum -a 256 downloaded/apisnip-macos-x86_64.tar.gz | cut -d ' ' -f 1)
+          fi
+          
+          # Create the formula file
+          cat > homebrew-formula/apisnip.rb << EOF
+          class Apisnip < Formula
+            desc "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
+            homepage "https://github.com/Tuurlijk/apisnip"
+            version "${{ steps.extract_version.outputs.VERSION }}"
+            license "MIT"
+            
+            on_macos do
+              on_arm do
+                url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-macos-arm64.tar.gz"
+                sha256 "${ARM64_SHA}"
+              end
+              
+              on_intel do
+                url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-macos-x86_64.tar.gz"
+                sha256 "${X86_64_SHA}"
+              end
+            end
+            
+            on_linux do
+              url "https://github.com/Tuurlijk/apisnip/releases/download/v${{ steps.extract_version.outputs.VERSION }}/apisnip-linux-x86_64.tar.gz"
+            end
+            
+            def install
+              bin.install "apisnip"
+            end
+            
+            test do
+              assert_match "ApiSnip ${{ steps.extract_version.outputs.VERSION }}", shell_output("#{bin}/apisnip --version", 2)
+            end
+          end
+          EOF
+          
+          # Create a zip of the formula
+          zip -r apisnip-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip homebrew-formula/apisnip.rb
+          
+          echo "HOMEBREW_FORMULA=apisnip-homebrew-${{ steps.extract_version.outputs.VERSION }}.zip" >> $GITHUB_OUTPUT
+
+      - name: Upload macOS packages to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.create_dmg.outputs.DMG_FILENAME }}
+            ${{ steps.create_dmg.outputs.DMG_FILENAME }}.sha256
+            ${{ steps.create_homebrew.outputs.HOMEBREW_FORMULA }}
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-aur-package:
+    name: Create AUR Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Get latest release
+        id: get_release
+        if: github.event.inputs.version == ''
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            RELEASE_TAG=${{ fromJson(steps.get_release.outputs.data).tag_name }}
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $VERSION"
+          
+      - name: Download source code
+        run: |
+          mkdir -p aur-package
+          cd aur-package
+          curl -L "https://github.com/${{ github.repository }}/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz" -o "apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz"
+          
+          # Calculate SHA256 sum
+          SOURCE_SHA256=$(sha256sum "apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz" | awk '{print $1}')
+          echo "SOURCE_SHA256=${SOURCE_SHA256}" >> $GITHUB_ENV
+
+      - name: Create PKGBUILD
+        id: create_pkgbuild
+        run: |
+          cd aur-package
+          
+          cat > PKGBUILD << EOF
+          # Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
+          
+          pkgname=apisnip
+          pkgver=${{ steps.extract_version.outputs.VERSION }}
+          pkgrel=1
+          pkgdesc="A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
+          arch=('x86_64' 'aarch64')
+          url="https://github.com/Tuurlijk/apisnip"
+          license=('MIT')
+          depends=()
+          makedepends=('cargo')
+          source=("\${pkgname}-\${pkgver}.tar.gz::https://github.com/Tuurlijk/apisnip/archive/refs/tags/v\${pkgver}.tar.gz")
+          sha256sums=('${SOURCE_SHA256}')
+          
+          build() {
+            cd "\${pkgname}-\${pkgver}"
+            cargo build --release
+          }
+          
+          package() {
+            cd "\${pkgname}-\${pkgver}"
+            install -Dm755 "target/release/\${pkgname}" "\${pkgdir}/usr/bin/\${pkgname}"
+            install -Dm644 "LICENSE" "\${pkgdir}/usr/share/licenses/\${pkgname}/LICENSE"
+            install -Dm644 "README.md" "\${pkgdir}/usr/share/doc/\${pkgname}/README.md"
+          }
+          EOF
+          
+          cat > .SRCINFO << EOF
+          pkgbase = apisnip
+          	pkgdesc = A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+          	pkgver = ${{ steps.extract_version.outputs.VERSION }}
+          	pkgrel = 1
+          	url = https://github.com/Tuurlijk/apisnip
+          	arch = x86_64
+          	arch = aarch64
+          	license = MIT
+          	makedepends = cargo
+          	source = apisnip-${{ steps.extract_version.outputs.VERSION }}.tar.gz::https://github.com/Tuurlijk/apisnip/archive/refs/tags/v${{ steps.extract_version.outputs.VERSION }}.tar.gz
+          	sha256sums = ${SOURCE_SHA256}
+          
+          pkgname = apisnip
+          EOF
+          
+          tar -czf apisnip-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz PKGBUILD .SRCINFO
+          echo "AUR_PACKAGE=apisnip-aur-${{ steps.extract_version.outputs.VERSION }}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload AUR package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: aur-package/${{ steps.create_pkgbuild.outputs.AUR_PACKAGE }}
+          tag_name: v${{ steps.extract_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      # Note: To actually publish to AUR, you would need to set up SSH keys
+      # and use git to push to the AUR. This is not implemented here as it
+      # requires AUR account credentials. 
