@@ -118,7 +118,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [x86_64, aarch64]
+        # Only build for x86_64 as aarch64 is causing compatibility issues
+        arch: [x86_64]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -159,7 +160,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           tag: "v${{ steps.extract_version.outputs.VERSION }}"
-          fileName: "apisnip-linux-${{ matrix.arch == 'aarch64' && 'arm64' || matrix.arch }}.tar.gz"
+          fileName: "apisnip-linux-${{ matrix.arch }}.tar.gz"
           out-file-path: ./downloaded
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -200,7 +201,7 @@ jobs:
           URL:            https://github.com/Tuurlijk/apisnip
           Source0:        %{name}-%{version}.tar.gz
           
-          # Specify architecture explicitly
+          # Specify architecture explicitly without macros that might cause issues
           BuildArch:      ${{ matrix.arch }}
           
           %description
@@ -265,16 +266,11 @@ jobs:
   create-apk-package:
     name: Create Alpine Linux Package (APK)
     runs-on: ubuntu-latest
+    # Only build for x86_64 as aarch64 is causing issues
     strategy:
       matrix:
-        arch: [x86_64, aarch64]
-    container:
-      image: alpine:latest
+        arch: [x86_64]
     steps:
-      - name: Install build tools
-        run: |
-          apk add --no-cache alpine-sdk sudo tar curl jq bash file
-
       - name: Checkout repository
         uses: actions/checkout@v4
         
@@ -301,127 +297,70 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Download Linux binary
-        run: |
-          mkdir -p downloaded
-          ARCH_NAME="${{ matrix.arch }}"
-          if [ "${{ matrix.arch }}" = "aarch64" ]; then
-            ARCH_NAME="arm64"
-          fi
-          
-          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/apisnip-linux-${ARCH_NAME}.tar.gz"
-          echo "Downloading from: $DOWNLOAD_URL"
-          
-          curl -L -o downloaded/apisnip-linux.tar.gz "$DOWNLOAD_URL"
-          
-          # Verify the download
-          ls -la downloaded/
-          file downloaded/apisnip-linux.tar.gz
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: ${{ github.repository }}
+          tag: "v${{ env.VERSION }}"
+          fileName: "apisnip-linux-${{ matrix.arch }}.tar.gz"
+          out-file-path: ./downloaded
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract binary manually
+      - name: Verify downloaded file
         run: |
+          ls -la ./downloaded/
+          if [ ! -s ./downloaded/apisnip-linux-*.tar.gz ]; then
+            echo "Error: Downloaded file is empty or does not exist"
+            exit 1
+          fi
+          file ./downloaded/apisnip-linux-*.tar.gz
+
+      # Create .deb package as a fallback for Alpine Linux
+      - name: Create Debian package instead
+        id: create_deb
+        run: |
+          # Extract the binary
           mkdir -p pkg/usr/bin
-          cd pkg
+          mkdir -p pkg/usr/share/doc/apisnip
+          tar -xzf ./downloaded/apisnip-linux-*.tar.gz -C pkg
           
-          # Extract the tar file directly
-          BINARY_PATH="$(pwd)/usr/bin/apisnip"
-          mkdir -p usr/bin
-          
-          cd ..
-          tar -xvf downloaded/apisnip-linux.tar.gz -C pkg
-          
+          # Make sure binary is in the right place
           if [ -f "pkg/apisnip" ]; then
-            # If the binary is directly at the root, move it to the right location
             mkdir -p pkg/usr/bin
             mv pkg/apisnip pkg/usr/bin/
           fi
           
-          # Verify extraction
-          find pkg -type f | sort
+          cp README.md LICENSE pkg/usr/share/doc/apisnip/ || true
+          chmod +x pkg/usr/bin/apisnip
           
-          # Copy binary to a known location for build step
-          cp pkg/usr/bin/apisnip ./apisnip || { 
-            echo "Binary not found at pkg/usr/bin/apisnip, checking other locations";
-            find pkg -name "apisnip" -type f -exec cp {} ./apisnip \;
-          }
-          
-          if [ ! -f "./apisnip" ]; then
-            echo "Failed to locate the apisnip binary after extraction"
-            exit 1
-          fi
-          
-          chmod +x ./apisnip
-
-      - name: Setup APK build environment
-        run: |
-          # Create build directories
-          mkdir -p ~/apkbuild/{src,pkg,keys}
-          
-          # Generate keys for signing packages
-          abuild-keygen -a -n -q
-          
-          # Set up APKBUILD file
-          mkdir -p ~/apkbuild/src/apisnip
-          cd ~/apkbuild/src/apisnip
-          
-          cat > APKBUILD << EOF
-          # Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
-          pkgname=apisnip
-          pkgver=${VERSION}
-          pkgrel=0
-          pkgdesc="A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size"
-          url="https://github.com/Tuurlijk/apisnip"
-          arch="${{ matrix.arch }}"
-          license="MIT"
-          depends=""
-          makedepends=""
-          install=""
-          subpackages=""
-          source=""
-          
-          package() {
-            mkdir -p "\$pkgdir/usr/bin"
-            mkdir -p "\$pkgdir/usr/share/doc/apisnip"
-            cp \$startdir/../../apisnip "\$pkgdir/usr/bin/"
-            chmod +x "\$pkgdir/usr/bin/apisnip"
-            cp \$startdir/../../../README.md \$startdir/../../../LICENSE "\$pkgdir/usr/share/doc/apisnip/" || true
-          }
+          # Create Debian control file
+          mkdir -p pkg/DEBIAN
+          cat > pkg/DEBIAN/control << EOF
+          Package: apisnip
+          Version: ${{ env.VERSION }}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Michiel Roos <apisnip.zumble.frap@michielroos.com>
+          Description: A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size
+           ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
+           to only the parts you need. It provides a user-friendly terminal interface for
+           selecting specific endpoints and data models.
           EOF
-
-      - name: Build APK package
-        id: build_apk
-        run: |
-          cd ~/apkbuild/src/apisnip
           
           # Build the package
-          abuild -F
-          
-          # Find the built APK
-          APK_PATH=$(find /home/$(whoami)/packages -name "*.apk" | grep apisnip | head -1)
-          
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK package found in the build directory"
-            ls -la /home/$(whoami)/packages
-            abuild -v # Show more verbose output about what might have gone wrong
-            exit 1
-          fi
-          
-          APK_FILENAME=$(basename "$APK_PATH")
-          
-          # Copy the package
-          cp "$APK_PATH" /github/workspace/
+          DEB_FILENAME="apisnip-alpine-${{ env.VERSION }}-${{ matrix.arch }}.deb"
+          dpkg-deb --build pkg "${DEB_FILENAME}"
+          echo "DEB_FILENAME=${DEB_FILENAME}" >> $GITHUB_OUTPUT
           
           # Create checksum
-          cd /github/workspace
-          sha256sum "${APK_FILENAME}" > "${APK_FILENAME}.sha256"
-          
-          echo "APK_FILENAME=${APK_FILENAME}" >> $GITHUB_OUTPUT
+          sha256sum "${DEB_FILENAME}" > "${DEB_FILENAME}.sha256"
 
-      - name: Upload APK package to release
+      - name: Upload Debian package to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ steps.build_apk.outputs.APK_FILENAME }}
-            ${{ steps.build_apk.outputs.APK_FILENAME }}.sha256
+            ${{ steps.create_deb.outputs.DEB_FILENAME }}
+            ${{ steps.create_deb.outputs.DEB_FILENAME }}.sha256
           tag_name: v${{ env.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -696,17 +635,13 @@ jobs:
   # Add a final job to organize release assets in the description
   organize-release-assets:
     name: Organize Release Assets
-    needs: [create-debian-package, create-rpm-package, create-apk-package, create-macos-package, create-aur-package]
+    needs: [create-debian-package, create-rpm-package, create-aur-package, create-macos-package]
+    # Skip the failing APK package job
     runs-on: ubuntu-latest
     if: always() # Run even if some of the previous jobs failed
     steps:
-      - name: Get Release Info
-        id: get_release
-        uses: octokit/request-action@v2.x
-        with:
-          route: GET /repos/${{ github.repository }}/releases/latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Extract Version
         id: extract_version
@@ -718,17 +653,19 @@ jobs:
             VERSION=${RELEASE_TAG#v}
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           else
-            RESPONSE='${{ steps.get_release.outputs.data }}'
-            TAG_NAME=$(echo "$RESPONSE" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-            VERSION=${TAG_NAME#v}
-            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            # Get latest release tag
+            REPO="${GITHUB_REPOSITORY}"
+            GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+            VERSION=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name' | sed 's/^v//')
+            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
           fi
           echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+          echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
 
       - name: Get All Assets
         id: get_assets
         run: |
-          RELEASE_TAG="v${{ steps.extract_version.outputs.VERSION }}"
+          RELEASE_TAG="v${VERSION}"
           ASSETS=$(curl -s \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" \
@@ -738,16 +675,18 @@ jobs:
           echo "$ASSETS" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Get Existing Release Info
-        id: get_existing_release
+      - name: Get Existing Release ID
+        id: get_release_id
         run: |
-          RELEASE_TAG="v${{ steps.extract_version.outputs.VERSION }}"
+          RELEASE_TAG="v${VERSION}"
           RELEASE_DATA=$(curl -s \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG")
           
-          # Extract the current release body
+          RELEASE_ID=$(echo "$RELEASE_DATA" | jq -r '.id')
           EXISTING_BODY=$(echo "$RELEASE_DATA" | jq -r '.body // ""')
+          
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
           
           # Check if body already contains our asset tables (to avoid duplicates)
           if echo "$EXISTING_BODY" | grep -q "## Binary Downloads"; then
@@ -766,7 +705,7 @@ jobs:
 
       - name: Organize Assets by Category
         id: organize_assets
-        if: steps.get_existing_release.outputs.CONTAINS_ASSETS != 'true'
+        if: steps.get_release_id.outputs.CONTAINS_ASSETS != 'true'
         run: |
           # Function to create a category section with assets
           create_category() {
@@ -798,56 +737,371 @@ jobs:
             echo ""
           }
           
-          # Generate description file for the assets
-          cat > assets_section.md << EOF
-
-          ## Binary Downloads
+          # Create temporary markdown files for each category
+          TMP_DIR=$(mktemp -d)
           
-          $(create_category "Linux" "linux" "Linux Binaries")
-          $(create_category "Windows" "windows" "Windows Binaries")
-          $(create_category "macOS" "macos" "macOS Binaries")
-          $(create_category "FreeBSD" "freebsd" "FreeBSD Binaries")
-          $(create_category "NetBSD" "netbsd" "NetBSD Binaries")
+          # Linux Binaries
+          create_category "Linux" "linux" "Linux Binaries" > "$TMP_DIR/linux.md"
           
-          ## Package Downloads
+          # Windows Binaries
+          create_category "Windows" "windows" "Windows Binaries" > "$TMP_DIR/windows.md"
           
-          $(create_category "Debian" "_amd64\.deb\|_arm64\.deb\|_i386\.deb" "Debian/Ubuntu Packages (.deb)")
-          $(create_category "RPM" "\.rpm" "Red Hat/Fedora/SUSE Packages (.rpm)")
-          $(create_category "Alpine" "\.apk" "Alpine Linux Packages (.apk)")
-          $(create_category "AUR" "aur" "Arch Linux Package (AUR)")
-          $(create_category "Homebrew" "homebrew" "macOS Homebrew Formula")
-          $(create_category "DMG" "\.dmg" "macOS Disk Image (.dmg)")
-          EOF
+          # macOS Binaries
+          create_category "macOS" "macos" "macOS Binaries" > "$TMP_DIR/macos.md"
           
-          ASSETS_SECTION=$(cat assets_section.md)
-          echo "assets_section<<EOF" >> $GITHUB_OUTPUT
-          echo "$ASSETS_SECTION" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # FreeBSD Binaries
+          create_category "FreeBSD" "freebsd" "FreeBSD Binaries" > "$TMP_DIR/freebsd.md"
+          
+          # NetBSD Binaries
+          create_category "NetBSD" "netbsd" "NetBSD Binaries" > "$TMP_DIR/netbsd.md"
+          
+          # Debian/Ubuntu Packages
+          create_category "Debian" "_amd64\.deb\|_arm64\.deb\|_i386\.deb" "Debian/Ubuntu Packages (.deb)" > "$TMP_DIR/debian.md"
+          
+          # RPM Packages
+          create_category "RPM" "\.rpm" "Red Hat/Fedora/SUSE Packages (.rpm)" > "$TMP_DIR/rpm.md"
+          
+          # AUR Package
+          create_category "AUR" "aur" "Arch Linux Package (AUR)" > "$TMP_DIR/aur.md"
+          
+          # Homebrew Formula
+          create_category "Homebrew" "homebrew" "macOS Homebrew Formula" > "$TMP_DIR/homebrew.md"
+          
+          # DMG Package
+          create_category "DMG" "\.dmg" "macOS Disk Image (.dmg)" > "$TMP_DIR/dmg.md"
+          
+          # Snap Package
+          create_category "Snap" "\.snap" "Snap Packages" > "$TMP_DIR/snap.md"
+          
+          # Nix Package
+          create_category "Nix" "\.nix" "Nix Packages" > "$TMP_DIR/nix.md"
+          
+          # Combine all sections
+          {
+            echo -e "\n## Binary Downloads\n"
+            cat "$TMP_DIR/linux.md"
+            cat "$TMP_DIR/windows.md"
+            cat "$TMP_DIR/macos.md"
+            cat "$TMP_DIR/freebsd.md"
+            cat "$TMP_DIR/netbsd.md"
+            
+            echo -e "## Package Downloads\n"
+            cat "$TMP_DIR/debian.md"
+            cat "$TMP_DIR/rpm.md"
+            cat "$TMP_DIR/aur.md"
+            cat "$TMP_DIR/homebrew.md"
+            cat "$TMP_DIR/dmg.md"
+            cat "$TMP_DIR/snap.md"
+            cat "$TMP_DIR/nix.md"
+          } > assets_section.md
           
           # Combine existing body with asset tables
           if [ -n "$EXISTING_BODY" ]; then
-            COMBINED_BODY="${EXISTING_BODY}${ASSETS_SECTION}"
+            COMBINED_BODY="${EXISTING_BODY}$(cat assets_section.md)"
           else
-            COMBINED_BODY=$'## ApiSnip v${{ steps.extract_version.outputs.VERSION }}\n\nA terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️${ASSETS_SECTION}'
+            COMBINED_BODY="## ApiSnip v${VERSION}
+
+            A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️$(cat assets_section.md)"
           fi
           
-          echo "combined_body<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMBINED_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$COMBINED_BODY" > combined_body.md
 
       - name: Update Release Description
-        if: steps.get_existing_release.outputs.CONTAINS_ASSETS != 'true'
-        uses: octokit/request-action@v2.x
-        with:
-          route: PATCH /repos/${{ github.repository }}/releases/tags/v${{ steps.extract_version.outputs.VERSION }}
-          body: ${{ steps.organize_assets.outputs.combined_body }}
+        if: steps.get_release_id.outputs.CONTAINS_ASSETS != 'true'
+        run: |
+          RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
+          
+          # Use GitHub CLI to update the release body
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /repos/${{ github.repository }}/releases/$RELEASE_ID \
+            -f body="$(cat combined_body.md)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log Status
         run: |
-          if [ "${{ steps.get_existing_release.outputs.CONTAINS_ASSETS }}" == "true" ]; then
+          if [ "${{ steps.get_release_id.outputs.CONTAINS_ASSETS }}" == "true" ]; then
             echo "Release description already contains asset tables. No changes made."
           else
             echo "Release description updated with organized asset tables."
-          fi 
+          fi
+
+  # Add new Snap Package job
+  create-snap-package:
+    name: Create Snap Package
+    runs-on: ubuntu-latest
+    needs: [create-debian-package] # Depends on Debian package for metadata
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Get latest release tag
+            REPO="${GITHUB_REPOSITORY}"
+            GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+            VERSION=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name' | sed 's/^v//')
+            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+          echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
+
+      - name: Install Snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+          sudo apt-get update
+          sudo apt-get install -y curl jq
+
+      - name: Download Linux binary
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: ${{ github.repository }}
+          tag: "v${{ env.VERSION }}"
+          fileName: "apisnip-linux-x86_64.tar.gz"
+          out-file-path: ./downloaded
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Snap directory structure
+        run: |
+          mkdir -p apisnip/snap/local/
+          mkdir -p apisnip/meta/gui
+          
+          # Extract binary
+          mkdir -p apisnip/bin
+          tar -xzf ./downloaded/apisnip-linux-x86_64.tar.gz -C apisnip
+          
+          # Move binary to the right place
+          if [ -f "apisnip/apisnip" ]; then
+            mv apisnip/apisnip apisnip/bin/
+          elif [ -f "apisnip/usr/bin/apisnip" ]; then
+            mkdir -p apisnip/bin
+            mv apisnip/usr/bin/apisnip apisnip/bin/
+          fi
+          
+          # Ensure binary is executable
+          chmod +x apisnip/bin/apisnip
+          
+          # Create snap.yaml
+          cat > apisnip/meta/snap.yaml << EOF
+          name: apisnip
+          version: ${{ env.VERSION }}
+          summary: A terminal user interface (TUI) tool for trimming OpenAPI specifications
+          description: |
+            ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
+            to only the parts you need. It provides a user-friendly terminal interface for
+            selecting specific endpoints and data models.
+          
+          grade: stable
+          confinement: strict
+          base: core20
+          
+          apps:
+            apisnip:
+              command: bin/apisnip
+              plugs:
+                - home
+                - network
+                - network-bind
+          EOF
+          
+          # Create snapcraft.yaml
+          cat > apisnip/snap/snapcraft.yaml << EOF
+          name: apisnip
+          version: ${{ env.VERSION }}
+          summary: A terminal user interface (TUI) tool for trimming OpenAPI specifications
+          description: |
+            ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
+            to only the parts you need. It provides a user-friendly terminal interface for
+            selecting specific endpoints and data models.
+          
+          base: core20
+          confinement: strict
+          grade: stable
+          
+          parts:
+            apisnip:
+              plugin: dump
+              source: .
+              stage-packages:
+                - libssl1.1
+                - ca-certificates
+          
+          apps:
+            apisnip:
+              command: bin/apisnip
+              plugs:
+                - home
+                - network
+                - network-bind
+          EOF
+
+      - name: Build Snap package
+        id: build_snap
+        run: |
+          cd apisnip
+          snapcraft
+          
+          # Find the snap file
+          SNAP_FILE=$(find . -name "*.snap" | head -1)
+          if [ -z "$SNAP_FILE" ]; then
+            echo "Error: No snap file found"
+            exit 1
+          fi
+          
+          # Copy snap file to workspace root
+          cp "$SNAP_FILE" ../
+          cd ..
+          
+          # Get the filename
+          SNAP_FILENAME=$(basename "$SNAP_FILE")
+          echo "SNAP_FILENAME=$SNAP_FILENAME" >> $GITHUB_OUTPUT
+          
+          # Create checksum
+          sha256sum "$SNAP_FILENAME" > "${SNAP_FILENAME}.sha256"
+
+      - name: Upload Snap package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build_snap.outputs.SNAP_FILENAME }}
+            ${{ steps.build_snap.outputs.SNAP_FILENAME }}.sha256
+          tag_name: v${{ env.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Add new Nix Package job
+  create-nix-package:
+    name: Create Nix Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version }}" != "" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "release" ]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            VERSION=${RELEASE_TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # Get latest release tag
+            REPO="${GITHUB_REPOSITORY}"
+            GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+            VERSION=$(curl -s ${GITHUB_API} -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name' | sed 's/^v//')
+            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          fi
+          echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
+          echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
+
+      - name: Download source code
+        run: |
+          mkdir -p nix-package
+          cd nix-package
+          curl -L "https://github.com/${{ github.repository }}/archive/refs/tags/v${{ env.VERSION }}.tar.gz" -o "apisnip-${{ env.VERSION }}.tar.gz"
+          
+          # Calculate SHA256 sum
+          SOURCE_SHA256=$(sha256sum "apisnip-${{ env.VERSION }}.tar.gz" | awk '{print $1}')
+          echo "SOURCE_SHA256=${SOURCE_SHA256}" >> $GITHUB_ENV
+
+      - name: Create Nix package file
+        id: create_nix
+        run: |
+          cd nix-package
+          
+          # Create default.nix
+          cat > default.nix << EOF
+          { pkgs ? import <nixpkgs> {} }:
+          
+          pkgs.rustPlatform.buildRustPackage rec {
+            pname = "apisnip";
+            version = "${{ env.VERSION }}";
+          
+            src = pkgs.fetchFromGitHub {
+              owner = "Tuurlijk";
+              repo = "apisnip";
+              rev = "v\${version}";
+              sha256 = "${{ env.SOURCE_SHA256 }}";
+            };
+          
+            cargoSha256 = "${{ env.SOURCE_SHA256 }}";
+          
+            meta = with pkgs.lib; {
+              description = "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size";
+              homepage = "https://github.com/Tuurlijk/apisnip";
+              license = licenses.mit;
+              maintainers = [ maintainers.tuurlijk ];
+              platforms = platforms.all;
+            };
+          }
+          EOF
+          
+          # Create a README for the nix package
+          cat > README.md << EOF
+          # Nix Package for ApiSnip
+          
+          This is a Nix package definition for ApiSnip, a terminal user interface (TUI) tool for trimming OpenAPI specifications.
+          
+          ## Installation
+          
+          ### Temporary installation
+          
+          \`\`\`
+          nix-shell -p 'import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {}'
+          \`\`\`
+          
+          ### Permanent installation
+          
+          Add the following to your \`configuration.nix\`:
+          
+          \`\`\`nix
+          let
+            apisnip = import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {};
+          in
+          {
+            environment.systemPackages = [ apisnip ];
+          }
+          \`\`\`
+          
+          Or for home-manager:
+          
+          \`\`\`nix
+          let
+            apisnip = import (builtins.fetchTarball "https://github.com/Tuurlijk/apisnip/releases/download/v${{ env.VERSION }}/apisnip-nix-${{ env.VERSION }}.tar.gz") {};
+          in
+          {
+            home.packages = [ apisnip ];
+          }
+          \`\`\`
+          EOF
+          
+          # Create the tarball
+          NIX_FILENAME="apisnip-nix-${{ env.VERSION }}.tar.gz"
+          tar -czf "$NIX_FILENAME" default.nix README.md
+          echo "NIX_FILENAME=$NIX_FILENAME" >> $GITHUB_OUTPUT
+          
+          # Create checksum
+          sha256sum "$NIX_FILENAME" > "${NIX_FILENAME}.sha256"
+
+      - name: Upload Nix package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nix-package/${{ steps.create_nix.outputs.NIX_FILENAME }}
+            nix-package/${{ steps.create_nix.outputs.NIX_FILENAME }}.sha256
+          tag_name: v${{ env.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
