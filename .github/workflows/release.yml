@@ -256,8 +256,16 @@ jobs:
           fi
 
       # Set up Rust toolchain
-      - name: Install Rust
+      - name: Install Rust (default)
+        if: matrix.target != 'x86_64-unknown-openbsd' && matrix.target != 'wasm32-wasi' && matrix.target != 'mips64-unknown-linux-gnuabi64'
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Set up nightly Rust toolchain for Tier 3 platforms
+      - name: Install Rust (Tier 3 platforms - nightly)
+        if: matrix.target == 'x86_64-unknown-openbsd' || matrix.target == 'wasm32-wasi' || matrix.target == 'mips64-unknown-linux-gnuabi64'
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.target }}
 
