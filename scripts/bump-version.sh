@@ -312,11 +312,17 @@ fi
 
 # Ask to execute the remaining steps
 if ! $DRY_RUN; then
-    printf "\n${YELLOW}Would you like to execute the commit, tag, and push steps automatically?${RESET} [y/N] "
+    step "Planned Actions 📋"
+    echo -e "${CYAN}1️⃣  Commit changes:${RESET} git commit -am \"Bump version to $NEW_VERSION\""
+    echo -e "${CYAN}2️⃣  Create tag:${RESET} git tag -a v$NEW_VERSION -m \"Release v$NEW_VERSION\""
+    echo -e "${CYAN}3️⃣  Push changes:${RESET} git push && git push --tags"
+    echo
+    
+    printf "${YELLOW}Would you like to execute these steps automatically?${RESET} [y/N] "
     read -r AUTO_EXECUTE
 
     if [[ "$AUTO_EXECUTE" =~ ^[Yy]$ ]]; then
-        step "Executing Remaining Steps 🚀"
+        step "Executing Steps 🚀"
         
         execute "git commit -am \"Bump version to $NEW_VERSION\"" \
                 "Committing changes..." \
@@ -348,11 +354,7 @@ if ! $DRY_RUN; then
             fi
         fi
     else
-        step "Next Steps 👣"
-        echo -e "${CYAN}1️⃣  Review changes:${RESET} git diff $CARGO_TOML"
-        echo -e "${CYAN}2️⃣  Commit changes:${RESET} git commit -am \"Bump version to $NEW_VERSION\""
-        echo -e "${CYAN}3️⃣  Create tag:${RESET} git tag -a v$NEW_VERSION -m \"Release v$NEW_VERSION\""
-        echo -e "${CYAN}4️⃣  Push changes:${RESET} git push && git push --tags"
+        info "No actions taken. You can run these steps manually."
     fi
 else
     step "Next Steps (Dry Run) 👣"
