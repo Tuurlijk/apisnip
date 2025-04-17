@@ -862,12 +862,6 @@ jobs:
           echo "Using version: $(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)"
           echo "VERSION=$(cat $GITHUB_OUTPUT | grep VERSION | cut -d= -f2)" >> $GITHUB_ENV
 
-      - name: Install Snapcraft
-        run: |
-          sudo snap install snapcraft --classic
-          sudo apt-get update
-          sudo apt-get install -y curl jq
-
       - name: Download Linux binary
         uses: robinraju/release-downloader@v1.8
         with:
@@ -879,52 +873,28 @@ jobs:
 
       - name: Create Snap directory structure
         run: |
-          mkdir -p apisnip/snap/local/
-          mkdir -p apisnip/meta/gui
+          mkdir -p snap-build/bin
+          mkdir -p snap-build/snap
           
           # Extract binary
-          mkdir -p apisnip/bin
-          tar -xzf ./downloaded/apisnip-linux-x86_64.tar.gz -C apisnip
+          tar -xzf ./downloaded/apisnip-linux-x86_64.tar.gz -C snap-build
           
           # Move binary to the right place
-          if [ -f "apisnip/apisnip" ]; then
-            mv apisnip/apisnip apisnip/bin/
-          elif [ -f "apisnip/usr/bin/apisnip" ]; then
-            mkdir -p apisnip/bin
-            mv apisnip/usr/bin/apisnip apisnip/bin/
+          if [ -f "snap-build/apisnip" ]; then
+            mv snap-build/apisnip snap-build/bin/
+          elif [ -f "snap-build/usr/bin/apisnip" ]; then
+            mkdir -p snap-build/bin
+            mv snap-build/usr/bin/apisnip snap-build/bin/
           fi
           
           # Ensure binary is executable
-          chmod +x apisnip/bin/apisnip
+          chmod +x snap-build/bin/apisnip
           
-          # Create snap.yaml
-          cat > apisnip/meta/snap.yaml << EOF
+          # Create snapcraft.yaml in snap/ directory
+          cat > snap-build/snap/snapcraft.yaml << EOF
           name: apisnip
           version: ${{ env.VERSION }}
-          summary: A terminal user interface (TUI) tool for trimming OpenAPI specifications
-          description: |
-            ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
-            to only the parts you need. It provides a user-friendly terminal interface for
-            selecting specific endpoints and data models.
-          
-          grade: stable
-          confinement: strict
-          base: core20
-          
-          apps:
-            apisnip:
-              command: bin/apisnip
-              plugs:
-                - home
-                - network
-                - network-bind
-          EOF
-          
-          # Create snapcraft.yaml
-          cat > apisnip/snap/snapcraft.yaml << EOF
-          name: apisnip
-          version: ${{ env.VERSION }}
-          summary: A terminal user interface (TUI) tool for trimming OpenAPI specifications
+          summary: A terminal user interface tool for trimming OpenAPI specifications
           description: |
             ApiSnip is a command-line tool that helps you trim down large OpenAPI specifications
             to only the parts you need. It provides a user-friendly terminal interface for
@@ -951,25 +921,23 @@ jobs:
                 - network-bind
           EOF
 
-      - name: Build Snap package
+      - name: Build Snap package using Docker
         id: build_snap
         run: |
-          cd apisnip
-          snapcraft
+          # Use Docker snapcraft image instead of multipass
+          docker run --rm -v $(pwd)/snap-build:/build -w /build snapcore/snapcraft:stable snapcraft
           
           # Find the snap file
-          SNAP_FILE=$(find . -name "*.snap" | head -1)
+          SNAP_FILE=$(find snap-build -name "*.snap" | head -1)
           if [ -z "$SNAP_FILE" ]; then
             echo "Error: No snap file found"
             exit 1
           fi
           
-          # Copy snap file to workspace root
-          cp "$SNAP_FILE" ../
-          cd ..
-          
           # Get the filename
           SNAP_FILENAME=$(basename "$SNAP_FILE")
+          cp "$SNAP_FILE" ./
+          
           echo "SNAP_FILENAME=$SNAP_FILENAME" >> $GITHUB_OUTPUT
           
           # Create checksum
