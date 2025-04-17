@@ -72,8 +72,6 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    # Run this job both when a tag is pushed and when a release is created
-    # If the action is from pushing a tag, wait for the release to be created
     needs: [create-release]
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || 
@@ -294,8 +292,10 @@ jobs:
           files: |
             ${{ matrix.asset_name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
             ${{ matrix.asset_name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}.sha256
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ steps.extract-version.outputs.VERSION }}  # Use extracted VERSION
           fail_on_unmatched_files: false
+          make_latest: false
+          append_body: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
