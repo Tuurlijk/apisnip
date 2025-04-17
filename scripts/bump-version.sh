@@ -306,8 +306,22 @@ echo -e "Changing version: ${RED}$CURRENT_VERSION${RESET} → ${GREEN}$NEW_VERSI
 if ! $DRY_RUN; then
     sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" "$CARGO_TOML"
     success "Updated $CARGO_TOML to version $NEW_VERSION"
+    
+    # Also update Cargo.lock
+    step "Updating Cargo.lock 🔄"
+    if [ -f "Cargo.lock" ]; then
+        # Extract package name from Cargo.toml
+        PACKAGE_NAME=$(grep '^name =' "$CARGO_TOML" | head -1 | sed 's/name = "\(.*\)"/\1/')
+        
+        info "Running cargo update for package: $PACKAGE_NAME"
+        cargo update --package "$PACKAGE_NAME"
+        success "Updated Cargo.lock with new version"
+    else
+        warning "Cargo.lock not found. It will be generated the next time you run cargo build."
+    fi
 else
     echo -e "${YELLOW}[DRY RUN]${RESET} Would update $CARGO_TOML to version $NEW_VERSION"
+    echo -e "${YELLOW}[DRY RUN]${RESET} Would update Cargo.lock"
 fi
 
 # Ask to execute the remaining steps
