@@ -635,7 +635,8 @@ jobs:
   # Add a final job to organize release assets in the description
   organize-release-assets:
     name: Organize Release Assets
-    needs: [create-debian-package, create-rpm-package, create-aur-package, create-macos-package]
+    # Update to include all package creation jobs including Snap and Nix
+    needs: [create-debian-package, create-rpm-package, create-aur-package, create-macos-package, create-snap-package, create-nix-package]
     # Skip the failing APK package job
     runs-on: ubuntu-latest
     if: always() # Run even if some of the previous jobs failed
@@ -813,13 +814,15 @@ jobs:
         run: |
           RELEASE_ID="${{ steps.get_release_id.outputs.RELEASE_ID }}"
           
-          # Use GitHub CLI to update the release body
-          gh api \
-            --method PATCH \
+          # Use curl instead of GitHub CLI to avoid YAML parsing issues with markdown content
+          ESCAPED_BODY=$(cat combined_body.md | jq -sR .)
+          
+          curl -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            /repos/${{ github.repository }}/releases/$RELEASE_ID \
-            -f body="$(cat combined_body.md)"
+            "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" \
+            -d "{\"body\": $ESCAPED_BODY}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
