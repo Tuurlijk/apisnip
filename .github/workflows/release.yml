@@ -13,10 +13,19 @@ on:
   release:
     types: [created, published]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Optimize compilation speed and binary size
+  RUSTFLAGS: "-C link-arg=-s"
+
 jobs:
+  # Build binaries for all platforms
   build-binaries:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Only build binaries for tags and releases
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +132,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Setup Rust cache with better granularity
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: ${{ matrix.target }}
+
       # Install Cross for cross-compilation targets
       - name: Install Cross
         if: matrix.use_cross == true
@@ -130,23 +146,28 @@ jobs:
         with:
           tool: cross
 
+      # Cache Cross Docker images
+      - name: Cache Cross Docker images
+        if: matrix.use_cross == true
+        uses: actions/cache@v4
+        with:
+          path: ~/.docker
+          key: ${{ runner.os }}-docker-${{ matrix.target }}-${{ hashFiles('Cross.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-${{ matrix.target }}-
+            ${{ runner.os }}-docker-
+
       # Set up Cross configuration (optional linker)
       - name: Set up Cross configuration
         if: matrix.use_cross == true
         run: |
           echo "[target.${{ matrix.target }}]" > Cross.toml
           echo "linker = 'gcc'" >> Cross.toml
-
-      # Cache dependencies
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/
-            target/
-          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.target }}-
+          # Add LTO for smaller binaries
+          echo "[profile.release]" >> Cross.toml
+          echo "lto = true" >> Cross.toml
+          echo "codegen-units = 1" >> Cross.toml
+          echo "opt-level = 's'" >> Cross.toml
 
       # Build the binary
       - name: Build with Cross (Linux cross-compilation)
@@ -158,6 +179,25 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
 
+      # Validate binary
+      - name: Validate binary
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            FILE_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}.exe"
+          else
+            FILE_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}"
+          fi
+          
+          # Check that file exists and has non-zero size
+          if [[ -f "$FILE_PATH" && -s "$FILE_PATH" ]]; then
+            echo "✅ Binary successfully built: $FILE_PATH"
+            ls -la "$FILE_PATH"
+          else
+            echo "❌ Failed to build binary or binary has zero size"
+            exit 1
+          fi
+
       # Prepare artifacts
       - name: Create tarball (Linux/macOS)
         if: runner.os != 'Windows'
@@ -167,6 +207,10 @@ jobs:
           BINARY_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}"
           cp $BINARY_PATH release/
           cp LICENSE README.md release/ || echo "LICENSE or README.md not found, skipping"
+          # Add version info file
+          echo "Version: ${{ steps.extract-version.outputs.VERSION }}" > release/VERSION
+          echo "Build Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> release/VERSION
+          echo "Git Commit: $(git rev-parse HEAD)" >> release/VERSION
           cd release
           tar czf ../${{ matrix.asset_name }}.tar.gz *
           cd ..
@@ -180,6 +224,10 @@ jobs:
           BINARY_PATH="target/${{ matrix.target }}/release/${{ steps.extract-binary.outputs.BINARY_NAME }}${{ matrix.is_windows && '.exe' || '' }}"
           cp $BINARY_PATH release/
           cp LICENSE README.md release/ || echo "LICENSE or README.md not found, skipping"
+          # Add version info file
+          echo "Version: ${{ steps.extract-version.outputs.VERSION }}" > release/VERSION
+          echo "Build Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> release/VERSION
+          echo "Git Commit: $(git rev-parse HEAD)" >> release/VERSION
           cd release
           7z a -tzip ../${{ matrix.asset_name }}.zip *
           cd ..
@@ -189,7 +237,7 @@ jobs:
 
       # Upload to GitHub Release
       - name: Upload to GitHub Release
-        if: github.event_name == 'release' && github.event.action == 'published'
+        if: github.event_name == 'release' && (github.event.action == 'published' || github.event.action == 'created')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -199,3 +247,33 @@ jobs:
           tag_name: ${{ github.ref }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cargo-publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    # Only publish on tags
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+      
+      - name: Check if crate exists
+        id: check_crate
+        run: |
+          VERSION=${{ github.ref_name }}
+          VERSION="${VERSION#v}"
+          EXISTS=$(cargo search apisnip --limit 1 | grep -c "apisnip = \"$VERSION\"" || true)
+          echo "exists=$EXISTS" >> $GITHUB_OUTPUT
+      
+      - name: Publish crate
+        if: steps.check_crate.outputs.exists == '0'
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
