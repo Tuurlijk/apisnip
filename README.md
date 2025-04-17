@@ -28,31 +28,39 @@ cargo install apisnip
 
 ### Pre-built Binaries
 
-Pre-built binary packages are available in the [GitHub releases](https://github.com/Tuurlijk/apisnip/releases). Each release includes a variety of package formats for different platforms:
+Pre-built binaries and packages are available on the [GitHub releases](https://github.com/Tuurlijk/apisnip/releases) page for multiple platforms and architectures:
 
-- **Linux**: `.deb`, `.rpm`, `.AppImage` (x86_64 only), and `.tar.gz` archives
-- **macOS**: `.dmg` and `.tar.gz` archives
-- **Windows**: `.msi` installers and `.zip` archives
+#### Binary Archives
+- **Linux**: x86_64, ARM (32/64-bit), RISC-V, PowerPC, s390x, and MUSL variants
+- **Windows**: 32-bit and 64-bit zip archives
+- **macOS**: Intel and Apple Silicon (ARM64) builds
+- **FreeBSD**: x86_64 builds
 
-We support a wide range of architectures:
-- x86_64 (64-bit Intel/AMD)
-- aarch64/arm64 (64-bit ARM)
-- armv7 (32-bit ARM v7)
-- arm (32-bit ARM)
-- i686/i386 (32-bit Intel/AMD)
-- RISC-V 64-bit
-- x86_64 with MUSL libc
+#### Package Formats
+- **Debian/Ubuntu**: Native `.deb` packages
+- **Red Hat/Fedora/SUSE**: RPM packages
+- **Arch Linux**: AUR package
+- **macOS**: Homebrew formula and DMG disk image
+- **Nix**: Package for NixOS and Nix package manager
 
-To download and use a pre-built binary:
+Each release includes SHA256 checksums for verifying file integrity.
 
-1. Visit the [latest release page](https://github.com/Tuurlijk/apisnip/releases/latest)
-2. Download the appropriate package for your platform
-3. Install using your platform's standard method:
-   - Linux: Use your package manager with `.deb`/`.rpm` or run the `.AppImage`
-   - macOS: Open the `.dmg` and drag to Applications
-   - Windows: Run the `.msi` installer
+#### Quick Installation
 
-If you prefer not to use installers, the `.tar.gz` and `.zip` archives contain standalone binaries.
+```bash
+# Linux x86_64 example
+curl -L https://github.com/Tuurlijk/apisnip/releases/download/[version]/apisnip-linux-x86_64.tar.gz | tar xz
+./apisnip
+
+# Or install using your system's package manager
+# Debian/Ubuntu
+sudo dpkg -i apisnip_[version]_amd64.deb
+
+# Homebrew (macOS)
+brew install apisnip
+```
+
+Replace `[version]` with the desired release version (e.g., `v1.4.56`).
 
 ## 📖 Usage
 
