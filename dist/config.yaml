@@ -1,0 +1,125 @@
+version: 2
+project_name: apisnip
+release:
+  github:
+    owner: Tuurlijk
+    name: apisnip
+  name_template: '{{.Tag}}'
+builds:
+  - id: linux-win
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - i686-unknown-linux-gnu
+      - x86_64-pc-windows-gnu
+      - i686-pc-windows-gnu
+    dir: .
+    main: .
+    binary: apisnip
+    hooks:
+      post:
+        - cmd: upx "{{ .Path }}" || true
+    builder: rust
+    tool: cargo
+    command: build
+    flags:
+      - --release
+  - id: macos
+    targets:
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+    dir: .
+    main: .
+    binary: apisnip
+    hooks:
+      pre:
+        - cmd: rustup target add {{ .Target }}
+    builder: rust
+    tool: cargo
+    command: build
+    flags:
+      - --release
+archives:
+  - id: default
+    builds_info:
+      mode: 493
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
+    formats:
+      - tar.gz
+    files:
+      - src: license*
+      - src: LICENSE*
+      - src: readme*
+      - src: README*
+      - src: changelog*
+      - src: CHANGELOG*
+snapshot:
+  version_template: '{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}'
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+changelog:
+  format: '{{ .SHA }} {{ .Message }}'
+dist: dist
+env_files:
+  github_token: ~/.config/goreleaser/github_token
+  gitlab_token: ~/.config/goreleaser/gitlab_token
+  gitea_token: ~/.config/goreleaser/gitea_token
+source:
+  name_template: '{{ .ProjectName }}-{{ .Version }}'
+  format: tar.gz
+gomod:
+  gobinary: go
+announce:
+  twitter:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+  mastodon:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+    server: ""
+  reddit:
+    title_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    url_template: '{{ .ReleaseURL }}'
+  slack:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+    username: GoReleaser
+  discord:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+    author: GoReleaser
+    color: "3888754"
+    icon_url: https://goreleaser.com/static/avatar.png
+  teams:
+    title_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+    color: '#2D313E'
+    icon_url: https://goreleaser.com/static/avatar.png
+  smtp:
+    subject_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    body_template: 'You can view details from: {{ .ReleaseURL }}'
+  mattermost:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+    title_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    username: GoReleaser
+  linkedin:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+  telegram:
+    message_template: '{{ mdv2escape .ProjectName }} {{ mdv2escape .Tag }} is out{{ mdv2escape "!" }} Check it out at {{ mdv2escape .ReleaseURL }}'
+    parse_mode: MarkdownV2
+  webhook:
+    message_template: '{ "message": "{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}"}'
+    content_type: application/json; charset=utf-8
+    expected_status_codes:
+      - 200
+      - 201
+      - 202
+      - 204
+  opencollective:
+    title_template: '{{ .Tag }}'
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out!<br/>Check it out at <a href="{{ .ReleaseURL }}">{{ .ReleaseURL }}</a>'
+  bluesky:
+    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Check it out at {{ .ReleaseURL }}'
+git:
+  tag_sort: -version:refname
+github_urls:
+  download: https://github.com
+gitlab_urls:
+  download: https://gitlab.com
