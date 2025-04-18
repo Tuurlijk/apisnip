@@ -9,6 +9,7 @@ pub struct Endpoint {
     pub description: String,
     pub refs: Vec<String>,
     pub status: Status,
+    pub parameters: Vec<String>,
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
@@ -48,9 +49,7 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
                 .as_str()
                 .ok_or_eyre("Method key is not a string")
                 .unwrap();
-            if method_str == "parameters" {
-                continue;
-            }
+                        
             if method_str == "summary" {
                 table_item.description = op.as_str().unwrap_or("").to_string();
                 continue;
@@ -59,6 +58,7 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
                 table_item.description = op.as_str().unwrap_or("").to_string();
                 continue;
             }
+            
             let mut method = Method::default();
             let summary = op
                 .as_mapping()
@@ -70,6 +70,16 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
                 .and_then(|m| m.get(Value::String("description".to_string())))
                 .and_then(|v| v.as_str())
                 .unwrap_or("No description");
+            
+            // Check for operation-level parameters
+            if let Some(op_map) = op.as_mapping() {
+                if let Some(params) = op_map.get(Value::String("parameters".to_string())) {
+                    if let Some(params_array) = params.as_sequence() {
+                        extract_parameters(params_array, &mut table_item.parameters);
+                    }
+                }
+            }
+            
             method.method = method_str.to_string();
             method.description = if !summary.is_empty() {
                 summary.to_string()
@@ -90,6 +100,37 @@ pub fn fetch_endpoints_from_spec(spec: &Mapping) -> Vec<Endpoint> {
     // Order table items by path
     table_items.sort_by(|a, b| a.path.cmp(&b.path));
     table_items
+}
+
+// Helper function to extract parameter names from a parameters array
+fn extract_parameters(params_array: &[Value], parameters: &mut Vec<String>) {
+    for param in params_array {
+        if let Some(param_map) = param.as_mapping() {
+            // Get the parameter name
+            if let Some(name_value) = param_map.get(Value::String("name".to_string())) {
+                if let Some(name) = name_value.as_str() {
+                    // Get the parameter location (in)
+                    let prefix = if let Some(in_value) = param_map.get(Value::String("in".to_string())) {
+                        if let Some(in_type) = in_value.as_str() {
+                            match in_type {
+                                "path" => "/",
+                                "body" => "body:",
+                                "query" => "?",
+                                _ => "",
+                            }
+                        } else {
+                            ""
+                        }
+                    } else {
+                        ""
+                    };
+                    
+                    // Add prefixed parameter name
+                    parameters.push(format!("{}{}", prefix, name));
+                }
+            }
+        }
+    }
 }
 
 /// Recursively fetch all $ref values from a Value tree

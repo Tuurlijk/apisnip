@@ -190,15 +190,24 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
         detail_lines.push(styled_method_with_description(method, 6));
     }
 
+    if !selected_item.refs.is_empty() || !selected_item.parameters.is_empty() {
+        detail_lines.push(Line::from("".to_string()));
+    }
+    // Display references if any
     let mut refs_lines: Vec<String> = Vec::new();
     for reference in selected_item.refs.iter() {
         refs_lines.push(reference.to_string());
     }
     if !refs_lines.is_empty() {
-        detail_lines.push(Line::from("".to_string()));
         detail_lines.push(Line::from(format!(
             "Component schemas: {}",
             refs_lines.join(", ")
+        )));
+    }
+    if !selected_item.parameters.is_empty() {
+        detail_lines.push(Line::from(format!(
+            "Parameters: {}",
+            selected_item.parameters.join(", ")
         )));
     }
 
