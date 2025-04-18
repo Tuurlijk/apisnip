@@ -314,6 +314,45 @@ fn update(model: &mut AppModel, msg: Message) -> Option<Message> {
             None
         }
 
+        Message::ScrollDown => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            
+            // Natural scrolling: ScrollDown moves the view down (increases offset)
+            model.table_state.scroll_down_by(1);
+            
+            // Keep selection in view: if selection is above visible area, move it down
+            if let Some(selected) = model.table_state.selected() {
+                let offset = model.table_state.offset();
+                if selected < offset {
+                    model.table_state.select(Some(offset));
+                }
+            }
+            None
+        }
+
+        Message::ScrollUp => {
+            if model.table_items.is_empty() {
+                return None;
+            }
+            
+            // Natural scrolling: ScrollUp moves the view up (decreases offset)
+            model.table_state.scroll_up_by(1);
+            
+            // Keep selection in view: if selection is below visible area, move it up
+            if let Some(selected) = model.table_state.selected() {
+                let offset = model.table_state.offset();
+                let visible_rows = calculate_visible_table_rows(model);
+                let last_visible = offset + visible_rows as usize;
+                
+                if selected >= last_visible && last_visible > 0 {
+                    model.table_state.select(Some(last_visible - 1));
+                }
+            }
+            None
+        }
+
         Message::GoToBottom => {
             if model.table_items.is_empty() {
                 return None;

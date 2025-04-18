@@ -11,6 +11,8 @@ pub enum Message {
     HideSearch,
     KeyPress(KeyEvent),
     Quit,
+    ScrollDown,
+    ScrollUp,
     SelectNext,
     SelectNextPage,
     SelectPrevious,
@@ -71,8 +73,8 @@ const fn handle_key(key: event::KeyEvent, model: &mut AppModel) -> Option<Messag
 
 const fn handle_mouse(mouse: event::MouseEvent) -> Option<Message> {
     match mouse.kind {
-        MouseEventKind::ScrollDown => Some(Message::SelectPrevious),
-        MouseEventKind::ScrollUp => Some(Message::SelectNext),
+        MouseEventKind::ScrollDown => Some(Message::ScrollDown),
+        MouseEventKind::ScrollUp => Some(Message::ScrollUp),
         MouseEventKind::Down(_) => Some(Message::SelectRow(mouse.row)),
         _ => None,
     }
