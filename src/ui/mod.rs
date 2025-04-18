@@ -12,6 +12,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Padding, Paragraph, Row, Scrollbar, ScrollbarState, Table,
 };
 use ratatui::{symbols, Frame};
+use widget::Shortcut;
 
 // Helper function to calculate visible rows in the table
 fn calculate_visible_table_rows(model: &crate::AppModel) -> usize {
@@ -210,12 +211,11 @@ pub fn render_detail(model: &crate::AppModel, area: Rect, frame: &mut Frame) {
     };
 
     let shortcuts = Shortcuts::new(vec![
-        ("q", "quit"),
-        ("space", "✂️snip"),
-        ("w", "write and quit"),
-        ("↑ ↓", "move"),
-        ("/", "search"),
-        ("Esc", "exit search"),
+        Shortcut::Pair("space", "✂️snip"),
+        Shortcut::Pair("w", "write and quit"),
+        Shortcut::Pair("/", "search"),
+        Shortcut::Trio("▼", "move", "▲"),
+        Shortcut::Pair("q", "quit"),
     ])
     .with_alignment(Alignment::Right)
     .with_label_style(model.default_style.add_modifier(Modifier::BOLD));
@@ -254,6 +254,14 @@ pub fn render_search(model: &mut crate::AppModel, area: Rect, frame: &mut Frame)
         ..symbols::border::PLAIN
     };
 
+    let shortcuts = Shortcuts::new(vec![
+        Shortcut::Pair("🔍", "search"),
+        Shortcut::Pair("Esc", "exit search"),
+        Shortcut::Pair("Ctrl+U", "clear search"),
+    ])
+    .with_alignment(Alignment::Left)
+    .with_label_style(model.default_style.add_modifier(Modifier::BOLD));
+
     let block = Block::default()
         .padding(Padding {
             left: 1,
@@ -263,11 +271,14 @@ pub fn render_search(model: &mut crate::AppModel, area: Rect, frame: &mut Frame)
         })
         .border_set(collapsed_top_border_set)
         .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-        .title(" 🔍 ")
+        .title(shortcuts.as_line())
         .style(model.default_style);
 
-    model.search_state.text_input.set_block(block);
-    frame.render_widget(&model.search_state.text_input, area);
+    let inner_area = block.inner(area);
+
+    frame.render_widget(block, area);
+
+    frame.render_widget(&model.search_state.text_input, inner_area);
 }
 
 fn styled_method_with_description(method: &Method, padding: usize) -> Line {

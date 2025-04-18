@@ -5,10 +5,16 @@ use ratatui::prelude::{Line, Modifier, Span, Style, Widget};
 use ratatui::style::Color;
 use ratatui::widgets::Clear;
 
+/// Enum to define shortcut structures for the constructor
+pub enum Shortcut<'a> {
+    Pair(&'a str, &'a str),
+    Trio(&'a str, &'a str, &'a str),
+}
+
 /// A widget to display keyboard shortcuts in the UI
 #[derive(Clone, Default)]
 pub struct Shortcuts {
-    shortcuts: Vec<(String, String)>,
+    shortcuts: Vec<(String, String, Option<String>)>,
     separator: String,
     shortcut_label_style: Style,
     shortcut_key_style: Style,
@@ -18,12 +24,17 @@ pub struct Shortcuts {
 }
 
 impl Shortcuts {
-    /// Create a new shortcuts widget from a vector of (key, label) pairs
-    pub fn from(values: Vec<(&str, &str)>) -> Self {
+    /// Create a new shortcuts widget from a vector of ShortcutDef enums
+    pub fn new(values: Vec<Shortcut>) -> Self {
         Self {
             shortcuts: values
                 .into_iter()
-                .map(|(k, l)| (k.to_string(), l.to_string()))
+                .map(|def| match def {
+                    Shortcut::Pair(k, l) => (k.to_string(), l.to_string(), None),
+                    Shortcut::Trio(k1, l, k2) => {
+                        (k1.to_string(), l.to_string(), Some(k2.to_string()))
+                    }
+                })
                 .collect(),
             separator: " | ".to_string(),
             shortcut_label_style: Style::default().add_modifier(Modifier::BOLD),
@@ -36,27 +47,13 @@ impl Shortcuts {
         }
     }
 
-    /// Create a new shortcuts widget directly (static constructor)
-    ///
-    /// # Example
-    /// ```
-    /// let shortcuts = Shortcuts::new(vec![
-    ///     ("Esc", "exit"),
-    ///     ("↑", "move up"),
-    /// ]);
-    /// frame.render_widget(shortcuts, area);
-    /// ```
-    pub fn new(values: Vec<(&str, &str)>) -> Self {
-        Self::from(values)
-    }
-
     /// Get the line representation of all shortcuts
     pub fn as_line(&self) -> Line {
         if self.shortcuts.is_empty() {
             return Line::default().alignment(self.alignment);
         }
 
-        let mut spans = Vec::with_capacity(self.shortcuts.len() * 5 + 2);
+        let mut spans = Vec::with_capacity(self.shortcuts.len() * 5 + 2); // Adjusted capacity estimate
 
         // Add start padding if configured
         if !self.padding_start.is_empty() {
@@ -64,37 +61,59 @@ impl Shortcuts {
         }
 
         // Process each shortcut
-        for (i, (key, label)) in self.shortcuts.iter().enumerate() {
+        for (i, (key1, label, key2_opt)) in self.shortcuts.iter().enumerate() {
             // Add separator before shortcut (except for the first one)
             if i > 0 {
                 spans.push(Span::raw(&self.separator));
             }
 
-            // Render the key-label pair
-            if label.contains(key) {
-                // Create mnemonic spans (key is part of the label)
-                let first_char = key.chars().next().unwrap_or('?');
-
-                if let Some(idx) = label.find(first_char) {
-                    // Split the label around the key character
-                    let before = &label[..idx];
-                    let highlight = &label[idx..idx + 1];
-                    let after = &label[idx + 1..];
-
-                    spans.push(Span::styled(before, self.shortcut_label_style));
-                    spans.push(Span::styled(highlight, self.shortcut_key_style));
-                    spans.push(Span::styled(after, self.shortcut_label_style));
-                } else {
-                    // Fallback to regular key + label
-                    spans.push(Span::styled(key, self.shortcut_key_style));
+            match key2_opt {
+                Some(key2) => {
+                    // Three-part shortcut: key1 label key2
+                    spans.push(Span::styled(key1, self.shortcut_key_style));
                     spans.push(Span::raw(" "));
                     spans.push(Span::styled(label, self.shortcut_label_style));
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(key2, self.shortcut_key_style));
                 }
-            } else {
-                // Regular shortcut (key + label)
-                spans.push(Span::styled(key, self.shortcut_key_style));
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(label, self.shortcut_label_style));
+                None => {
+                    // Two-part shortcut: Try mnemonic highlighting first
+                    if label.contains(key1) {
+                        // Create mnemonic spans (key is part of the label)
+                        let first_char = key1.chars().next().unwrap_or('?'); // Use key1
+
+                        if let Some(idx) = label.find(first_char) {
+                            // Ensure the key is not empty before slicing
+                            let key_len = key1.chars().count();
+                            if key_len > 0 && idx + key_len <= label.chars().count() {
+                                // Split the label around the key
+                                let before = label.chars().take(idx).collect::<String>();
+                                let highlight =
+                                    label.chars().skip(idx).take(key_len).collect::<String>();
+                                let after = label.chars().skip(idx + key_len).collect::<String>();
+
+                                spans.push(Span::styled(before, self.shortcut_label_style));
+                                spans.push(Span::styled(highlight, self.shortcut_key_style));
+                                spans.push(Span::styled(after, self.shortcut_label_style));
+                            } else {
+                                // Fallback if slicing indices are invalid (should be rare)
+                                spans.push(Span::styled(key1, self.shortcut_key_style));
+                                spans.push(Span::raw(" "));
+                                spans.push(Span::styled(label, self.shortcut_label_style));
+                            }
+                        } else {
+                            // Fallback to regular key + label if char not found
+                            spans.push(Span::styled(key1, self.shortcut_key_style));
+                            spans.push(Span::raw(" "));
+                            spans.push(Span::styled(label, self.shortcut_label_style));
+                        }
+                    } else {
+                        // Regular shortcut (key + label)
+                        spans.push(Span::styled(key1, self.shortcut_key_style));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(label, self.shortcut_label_style));
+                    }
+                }
             }
         }
 
