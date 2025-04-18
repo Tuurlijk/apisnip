@@ -383,10 +383,12 @@ if ! $DRY_RUN; then
         # Only proceed with push if we have something to push (commit or tag)
         if [ $? -eq 0 ]; then
             # Confirm before pushing (this is a potentially risky operation)
-            printf "${YELLOW}Ready to push changes and tags to remote. Continue?${RESET} [y/N] "
+            printf "${YELLOW}Ready to push changes and tags to remote. Continue?${RESET} [Y/n] "
             read -r CONFIRM_PUSH
             
-            if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+            if [[ "$CONFIRM_PUSH" =~ ^[Nn]$ ]]; then
+                info "Skipping push operation. Changes are committed locally."
+            else
                 execute "git push && git push --tags" \
                         "Pushing changes and tags..." \
                         "Failed to push. Do you have upstream permissions?"
@@ -394,8 +396,6 @@ if ! $DRY_RUN; then
                 if [ $? -eq 0 ]; then
                     success "All steps completed successfully! 🎉"
                 fi
-            else
-                info "Skipping push operation. Changes are committed locally."
             fi
         fi
     fi
