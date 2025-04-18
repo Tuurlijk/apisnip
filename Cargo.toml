@@ -1,7 +1,7 @@
 [package]
 name = "apisnip"
 description = "A terminal user interface (TUI) tool for trimming OpenAPI specifications down to size ✂️"
-version = "1.4.58"
+version = "1.4.59"
 edition = "2021"
 authors = ["Michiel Roos <apisnip.zumble.frap@michielroos.com>"]
 license = "MIT"
