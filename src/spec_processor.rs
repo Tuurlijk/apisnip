@@ -1,6 +1,7 @@
 use color_eyre::eyre::{OptionExt, Result};
 use itertools::Itertools;
 use serde_yaml::{Mapping, Value};
+use std::collections::HashSet;
 
 #[derive(Default, Clone)]
 pub struct Endpoint {
@@ -165,6 +166,88 @@ fn strip_path_from_references(references: &[String]) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
+/// Extract component name and type from a $ref string
+/// Returns (component_type, component_name) or None if not a component reference
+fn parse_component_ref(ref_str: &str) -> Option<(String, String)> {
+    if ref_str.starts_with("#/components/") {
+        let parts: Vec<&str> = ref_str.split('/').collect();
+        if parts.len() >= 4 {
+            let component_type = parts[2].to_string();
+            let component_name = parts[3..].join("/");
+            return Some((component_type, component_name));
+        }
+    }
+    None
+}
+
+/// Recursively collect all transitive component references
+/// Returns a set of (component_type, component_name) tuples
+fn collect_transitive_references(
+    components: &Mapping,
+    initial_refs: &[String],
+) -> HashSet<(String, String)> {
+    let mut all_refs = HashSet::new();
+    let mut to_process: Vec<(String, String)> = Vec::new();
+
+    // Parse initial references
+    for ref_str in initial_refs {
+        if let Some((comp_type, comp_name)) = parse_component_ref(ref_str) {
+            let key = (comp_type, comp_name);
+            if all_refs.insert(key.clone()) {
+                to_process.push(key);
+            }
+        }
+    }
+
+    // Process references recursively
+    while let Some((comp_type, comp_name)) = to_process.pop() {
+        if let Some(comp_section) = components.get(Value::String(comp_type.clone())) {
+            if let Some(comp_mapping) = comp_section.as_mapping() {
+                if let Some(comp_value) = comp_mapping.get(Value::String(comp_name.clone())) {
+                    // Extract all references from this component
+                    for nested_ref in fetch_all_references(comp_value) {
+                        if let Some((nested_type, nested_name)) = parse_component_ref(&nested_ref) {
+                            let key = (nested_type.clone(), nested_name.clone());
+                            if all_refs.insert(key.clone()) {
+                                to_process.push(key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    all_refs
+}
+
+/// Extract security scheme names from security requirements
+fn extract_security_schemes(value: &Value) -> Vec<String> {
+    let mut schemes = Vec::new();
+    match value {
+        Value::Sequence(seq) => {
+            for item in seq {
+                if let Some(map) = item.as_mapping() {
+                    for (key, _) in map {
+                        if let Some(scheme_name) = key.as_str() {
+                            schemes.push(scheme_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        Value::Mapping(map) => {
+            for (key, _) in map {
+                if let Some(scheme_name) = key.as_str() {
+                    schemes.push(scheme_name.to_string());
+                }
+            }
+        }
+        _ => {}
+    }
+    schemes
+}
+
 pub fn process_spec_for_output(spec: &Mapping, selected_items: &[&Endpoint]) -> Result<Mapping> {
     let original_path_specifications = spec
         .get(Value::String("paths".to_string()))
@@ -180,37 +263,41 @@ pub fn process_spec_for_output(spec: &Mapping, selected_items: &[&Endpoint]) -> 
         }
     }
 
-    // Collect all references from selected items
-    let collected_references: Vec<String> = selected_items
+    // Collect all $ref references from selected paths
+    let initial_refs: Vec<String> = selected_items
         .iter()
-        .flat_map(|item| &item.refs)
-        .cloned()
-        .unique()
+        .filter_map(|item| original_path_specifications.get(Value::String(item.path.clone())))
+        .flat_map(fetch_all_references)
         .collect();
 
-    // Collect all references to preserve
-    let mut all_references_to_preserve = Vec::new();
-    let components = spec
-        .get(Value::String("components".to_string()))
-        .and_then(|v| v.as_mapping())
-        .unwrap();
-    for (key, value) in components {
-        if key.as_str() == Some("schemas") {
-            if let Some(schema) = value.as_mapping() {
-                for (schema_key, schema_value) in schema {
-                    if collected_references.contains(&schema_key.as_str().unwrap().to_string()) {
-                        all_references_to_preserve.extend(fetch_all_references(schema_value));
+    // Extract security scheme references from selected paths and top-level
+    let mut security_schemes = HashSet::new();
+    for item in selected_items {
+        if let Some(path_data) = original_path_specifications.get(Value::String(item.path.clone())) {
+            if let Some(path_map) = path_data.as_mapping() {
+                for op_value in path_map.values() {
+                    if let Some(op_map) = op_value.as_mapping() {
+                        if let Some(security) = op_map.get(Value::String("security".to_string())) {
+                            security_schemes.extend(extract_security_schemes(security));
+                        }
                     }
                 }
             }
         }
     }
+    if let Some(security) = spec.get(Value::String("security".to_string())) {
+        security_schemes.extend(extract_security_schemes(security));
+    }
 
-    // Process all references
-    let mut all_references = strip_path_from_references(&all_references_to_preserve);
-    all_references.extend(collected_references);
-    all_references.sort();
-    all_references.dedup();
+    // Get components section
+    let empty_components = Mapping::new();
+    let components = spec
+        .get(Value::String("components".to_string()))
+        .and_then(|v| v.as_mapping())
+        .unwrap_or(&empty_components);
+
+    // Collect all transitive component references
+    let all_component_refs = collect_transitive_references(components, &initial_refs);
 
     // Store the order of keys from the original spec
     let key_order: Vec<Value> = spec.keys().cloned().collect();
@@ -227,17 +314,27 @@ pub fn process_spec_for_output(spec: &Mapping, selected_items: &[&Endpoint]) -> 
         } else if key.as_str() == Some("components") {
             // Handle components section
             let mut components_output = Mapping::new();
-            for (child_key, child_value) in value.as_mapping().unwrap() {
-                if child_key.as_str() != Some("schemas") {
-                    components_output.insert(child_key.clone(), child_value.clone());
-                } else {
-                    let mut schema_output = Mapping::new();
-                    for (schema_key, schema_value) in child_value.as_mapping().unwrap() {
-                        if all_references.contains(&schema_key.as_str().unwrap().to_string()) {
-                            schema_output.insert(schema_key.clone(), schema_value.clone());
+            if let Some(components_map) = value.as_mapping() {
+                for (child_key, child_value) in components_map {
+                    let child_key_str = child_key.as_str().unwrap_or("");
+                    let mut filtered_section = Mapping::new();
+
+                    if let Some(section_map) = child_value.as_mapping() {
+                        for (item_key, item_value) in section_map {
+                            let item_key_str = item_key.as_str().unwrap_or("");
+                            let lookup_key = (child_key_str.to_string(), item_key_str.to_string());
+                            let should_include = all_component_refs.contains(&lookup_key)
+                                || (child_key_str == "securitySchemes" && security_schemes.contains(item_key_str));
+
+                            if should_include {
+                                filtered_section.insert(item_key.clone(), item_value.clone());
+                            }
                         }
                     }
-                    components_output.insert(child_key.clone(), Value::Mapping(schema_output));
+
+                    if !filtered_section.is_empty() {
+                        components_output.insert(child_key.clone(), Value::Mapping(filtered_section));
+                    }
                 }
             }
             output.insert(key, Value::Mapping(components_output));
