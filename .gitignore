@@ -1,3 +1,5 @@
+/.beads
+/.github/copilot-instructions.md
 /dist
 /target
 /apisnip.out.yaml
